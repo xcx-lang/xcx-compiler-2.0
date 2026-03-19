@@ -1,0 +1,15 @@
+---=============================================================================
+--- 10. HALT & TERMINAL
+--- VALIDATES: halt.alert/error, .terminal aliases
+---=============================================================================
+
+>! "Testing Halt System (Check output visually)...";
+
+halt.alert >! "Spec alert test - Should not stop";
+
+.terminal !clear;
+>! "Terminal clear called.";
+
+--- .terminal !exit; --- Too disruptive for suite
+
+>! "10. HALT & TERMINAL: SUCCESS (Partial check)";

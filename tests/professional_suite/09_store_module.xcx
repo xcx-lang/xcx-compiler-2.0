@@ -1,0 +1,28 @@
+--- 09_store_module.xcx
+--- Testing file I/O operations according to Spec Section 15.
+
+s: test_file = "test_data.tmp";
+s: initial_content = "XCX Store Test Content";
+
+--- store.write()
+store.write(test_file, initial_content);
+
+--- store.exists()
+if (!store.exists(test_file)) then;
+    halt.error >! "store.exists() failed";
+end;
+
+--- store.read()
+s: read_vals = store.read(test_file);
+if (read_vals != initial_content) then;
+    halt.error >! "store.read() failed";
+end;
+
+--- store.append()
+store.append(test_file, "\nAppended line");
+s: read_appended = store.read(test_file);
+if (read_appended HAS "\nAppended line" == false) then;
+    halt.error >! "store.append() failed";
+end;
+
+>! "Store module test passed";

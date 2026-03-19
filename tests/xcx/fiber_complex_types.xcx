@@ -1,0 +1,78 @@
+--- Test for fibers yielding complex data types to ensure VM Reference Counting and typing works.
+
+--- 1. Array
+fiber yield_array(-> array:i) {
+    array:i: arr {10, 20, 30};
+    yield arr;
+};
+
+fiber:array:i: fa = yield_array();
+array:i: res_arr = fa.next();
+>! "Array size: " + res_arr.size();
+>! "Array [1]: " + res_arr.get(1);
+
+--- 2. Set
+fiber yield_set(-> set:N) {
+    set:N: s {1, 2, 3, 2, 1};
+    yield s;
+};
+
+fiber:set:N: fs = yield_set();
+set:N: res_set = fs.next();
+>! "Set size: " + res_set.size();
+>! "Set contains 2: " + res_set.contains(2);
+
+--- 3. Map
+fiber yield_map(-> map) {
+    map: m {
+        schema = [i <-> i]
+        data = [1 :: 30, 2 :: 25]
+    };
+    yield m;
+};
+
+fiber:map: fm = yield_map();
+map: res_map = fm.next();
+>! "Map bob age: " + res_map.get(2);
+
+--- 4. Date
+fiber yield_date(-> date) {
+    date: d = date("2024-12-25");
+    yield d;
+};
+
+fiber:date: fd = yield_date();
+date: res_date = fd.next();
+>! "Date year: " + res_date.year;
+
+--- 5. JSON
+fiber yield_json(-> json) {
+    json: j <<<
+    {
+        "server": "localhost",
+        "port": 8080
+    }
+    >>>;
+    yield j;
+};
+
+fiber:json: fj = yield_json();
+json: res_json = fj.next();
+s: host;
+res_json.bind("server", host);
+>! "JSON host: " + host;
+
+--- 6. Table
+fiber yield_table(-> table) {
+    table: t {
+        columns = [id::i @auto, name::s]
+        rows = [("First"), ("Second")]
+    };
+    yield t;
+};
+
+fiber:table: ft = yield_table();
+table: res_table = ft.next();
+>! "Table count: " + res_table.count();
+
+>! "ALL COMPLEX TESTS PASSED";

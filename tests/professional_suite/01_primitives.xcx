@@ -1,0 +1,28 @@
+
+i: age = 30;
+f: price = 19.99;
+s: name = "Antigravity";
+b: active = true;
+
+
+i: def_i;
+f: def_f;
+s: def_s;
+b: def_b;
+
+if (def_i != 0) then;
+    halt.error >! "Default int should be 0";
+end;
+if (def_f != 0.0) then;
+    halt.error >! "Default float should be 0.0";
+end;
+if (def_s != "") then;
+    halt.error >! "Default string should be empty";
+end;
+if (def_b != false) then;
+    halt.error >! "Default bool should be false";
+end;
+
+const i: MAX_VAL = 100;
+
+>! "Primitives test passed";

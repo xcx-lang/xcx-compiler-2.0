@@ -1,0 +1,37 @@
+--- Fiber Basic Test: typed fiber:i yielding integers
+
+fiber counter(i: start, i: step -> i) {
+    i: val = start;
+    while (val == val) do;
+        yield val;
+        val = val + step;
+    end;
+};
+
+fiber:i: f = counter(0, 2);
+
+i: a = f.next();
+i: b = f.next();
+i: c = f.next();
+
+>! "first: " + a;
+>! "second: " + b;
+>! "third: " + c;
+
+if (a == 0) then;
+    >! "TEST a PASSED";
+else;
+    >! "TEST a FAILED";
+end;
+
+if (b == 2) then;
+    >! "TEST b PASSED";
+else;
+    >! "TEST b FAILED";
+end;
+
+if (c == 4) then;
+    >! "TEST c PASSED";
+else;
+    >! "TEST c FAILED";
+end;

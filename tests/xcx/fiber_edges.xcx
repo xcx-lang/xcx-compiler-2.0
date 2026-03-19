@@ -1,0 +1,44 @@
+fiber empty_fiber( -> i) {
+    if (false) then; yield 0; end;
+};
+
+fiber error_fiber( -> i) {
+    yield 1;
+    halt.error >! "Oops!";
+    yield 2;
+};
+
+fiber close_fiber( -> s) {
+    yield "a";
+    yield "b";
+    yield "c";
+};
+
+fiber range_gen(i: n -> i) {
+    for x in 1 to n do; yield x; end;
+};
+
+>! "Empty fiber test:";
+for x in empty_fiber() do;
+    >! "Should not see this: " + x;
+end;
+
+>! "Error fiber test:";
+fiber:i: ef = error_fiber();
+>! ef.next();
+
+>! "Close fiber test:";
+fiber:s: cf = close_fiber();
+>! cf.next();
+cf.close();
+>! "Is done? " + cf.isDone();
+for x in cf do;
+    >! "Should not see this: " + x;
+end;
+
+>! "Break/Continue test:";
+for x in range_gen(5) do;
+    if (x == 2) then; continue; end;
+    if (x == 4) then; break; end;
+    >! x;
+end;

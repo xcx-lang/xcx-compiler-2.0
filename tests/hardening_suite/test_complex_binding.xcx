@@ -1,0 +1,81 @@
+--- test_complex_binding.xcx
+
+>! "[Hardening] Starting Complex Binding Test...";
+
+--- 1. Nested JSON and multi-type binding
+json: raw <<< {
+    "user": {
+        "id": 101,
+        "name": "HardeningTest",
+        "nested": {
+            "flags": [true, false, true],
+            "score": 98.5
+        }
+    },
+    "metadata": {
+        "created_at": "2024-03-15",
+        "tags": ["stress", "json", "xcx"]
+    }
+} >>>;
+
+i: uid;
+s: uname;
+f: score;
+b: flag0;
+b: flag1;
+
+raw.bind("user.id", uid);
+raw.bind("user.name", uname);
+raw.bind("user.nested.score", score);
+raw.bind("user.nested.flags[0]", flag0);
+raw.bind("user.nested.flags[1]", flag1);
+
+if (uid == 101 AND uname == "HardeningTest" AND score == 98.5 AND flag0 == true AND flag1 == false) then;
+    >! "[Hardening] JSON Nested Binding: PASS";
+else;
+    halt.error >! "[Hardening] JSON Nested Binding: FAIL";
+end;
+
+--- 2. Bulk Injection to Table
+table: logs {
+    columns = [ id :: i, msg :: s, level :: i ]
+    rows = [EMPTY]
+};
+
+json: log_data <<< {
+    "items": [
+        {"id": 1, "m": "init", "l": 0},
+        {"id": 2, "m": "start", "l": 1},
+        {"id": 3, "m": "error", "l": 2}
+    ]
+} >>>;
+
+map: log_map {
+    schema = [s <-> s]
+    data = ["id"::"id", "msg"::"m", "level"::"l"]
+};
+
+log_data.inject("items", log_map, logs);
+
+if (logs.count() == 3 AND logs.get(1).msg == "start") then;
+    >! "[Hardening] JSON Table Injection: PASS";
+else;
+    halt.error >! "[Hardening] JSON Table Injection: FAIL";
+end;
+
+--- 3. Dynamic Setting and Array growth
+json: dyn <<< {"data": []} >>>;
+for i in 0 to 9 do;
+    dyn.set("data[" + i + "]", i * 10);
+end;
+
+i: d_val;
+dyn.bind("data[5]", d_val);
+--- .count() na obiekcie JSON zwraca liczbę kluczy. Tu mamy jeden klucz "data".
+if (dyn.count() == 1 AND d_val == 50) then;
+    >! "[Hardening] JSON Dynamic Array Set: PASS";
+else;
+    halt.error >! "[Hardening] JSON Dynamic Array Set: FAIL. Count: " + dyn.count() + ", val: " + d_val;
+end;
+
+>! "[Hardening] All Complex Binding Tests: PASS";

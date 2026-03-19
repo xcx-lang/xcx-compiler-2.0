@@ -1,0 +1,21 @@
+--- Fiber Void Test: void fiber using .run() and .isDone()
+
+fiber ticker() {
+    >! "tick 1";
+    yield;
+    >! "tick 2";
+    yield;
+    >! "tick 3";
+};
+
+fiber: t = ticker();
+
+t.run();
+t.run();
+t.run();
+
+if (t.isDone()) then;
+    >! "FIBER DONE TEST: PASSED";
+else;
+    >! "FIBER DONE TEST: FAILED";
+end;

@@ -1,0 +1,48 @@
+--- Test for mutating reference-counted objects inside a fiber.
+
+fiber mutator(array:i: arr, table: t) {
+    --- Suspend
+    yield;
+
+    --- Mutate array
+    arr.insert(1, 99);
+
+    --- Mutate table
+    t.insert("Third");
+
+    --- Suspend again
+    yield;
+};
+
+array:i: my_arr {10, 20};
+table: my_table {
+    columns = [id::i @auto, name::s]
+    rows = [("First"), ("Second")]
+};
+
+fiber: fib = mutator(my_arr, my_table);
+
+--- Start fiber (suspends initially)
+fib.run();
+
+--- Array should still be {10, 20}
+if (my_arr.size() != 2) then;
+    halt.error >! "Array mutated too early";
+end;
+
+--- Resume fiber (mutates and suspends)
+fib.run();
+
+--- Array should now be {10, 99, 20}
+>! "Modified array size: " + my_arr.size();
+>! "Modified array [1]: " + my_arr.get(1);
+
+--- Table should have 3 items
+>! "Modified table count: " + my_table.count();
+>! "Modified table [2].name: " + my_table.get(2).name;
+
+if (my_arr.get(1) == 99 AND my_table.count() == 3) then;
+    >! "MUTATION TEST PASSED";
+else;
+    halt.error >! "Mutation failed";
+end;

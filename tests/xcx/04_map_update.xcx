@@ -1,0 +1,27 @@
+map: ages {
+    schema = [s <-> i]
+    data = [
+        "alice" :: 30,
+        "bob" :: 25
+    ]
+};
+
+i: before = ages.get("alice");
+>! "Alice before update: " + before;
+
+ages.insert("alice", 35);
+i: after = ages.get("alice");
+>! "Alice after update: " + after;
+
+ages.insert("carol", 22);
+b: has_carol = ages.contains("carol");
+>! "Has carol: " + has_carol;
+
+i: carol_age = ages.get("carol");
+>! "Carol age: " + carol_age;
+
+i: sz = ages.size();
+>! "Map size: " + sz;
+
+array:s: all_keys = ages.keys();
+>! "Keys count: " + all_keys.size();

@@ -1,0 +1,27 @@
+--- Test for recursive typing: a fiber yielding another fiber.
+
+fiber inner(i: start -> i) {
+    yield start;
+    yield start + 1;
+};
+
+fiber outer(i: start -> fiber:i) {
+    fiber:i: f = inner(start);
+    yield f;
+};
+
+--- Instantiate the outer fiber
+fiber:fiber:i: f_out = outer(10);
+
+--- Get the inner fiber and run it directly!
+i: val1 = f_out.next().next();
+i: val2 = f_out.next().next();
+
+>! "Val1: " + val1;
+>! "Val2: " + val2;
+
+if (val1 == 10 AND val2 == 11) then;
+    >! "YIELD FIBER PASSED";
+else;
+    halt.error >! "Values did not match";
+end;

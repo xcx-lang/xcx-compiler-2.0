@@ -1,0 +1,46 @@
+--- 13_fibers.xcx
+--- Testing fibers (coroutines) according to Spec Section 19.
+
+fiber counter(i: count -> i) {
+    for i in 1 to count do;
+        yield i;
+    end;
+};
+
+fiber:i: f = counter(3);
+
+--- next()
+if (f.next() != 1) then;
+    halt.error >! "Fiber next(1) failed";
+end;
+if (f.next() != 2) then;
+    halt.error >! "Fiber next(2) failed";
+end;
+if (f.next() != 3) then;
+    halt.error >! "Fiber next(3) failed";
+end;
+
+--- isDone()
+if (!f.isDone()) then;
+    halt.error >! "Fiber isDone() failed";
+end;
+
+--- Void fiber
+i: side_val = 0;
+fiber logger() {
+    side_val = 1;
+    yield;
+    side_val = 2;
+};
+
+fiber: fv = logger();
+fv.run();
+if (side_val != 1) then;
+    halt.error >! "Fiber run(1) failed";
+end;
+fv.run();
+if (side_val != 2) then;
+    halt.error >! "Fiber run(2) failed";
+end;
+
+>! "Fibers test passed";

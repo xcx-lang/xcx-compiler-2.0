@@ -1,0 +1,19 @@
+fiber counter(i: n -> i) {
+    for i in 1 to n do;
+        yield i;
+    end;
+};
+
+func drain(fiber:i: f -> i) {
+    i: total = 0;
+    while (f.isDone() == false) do;
+        total = total + f.next();
+    end;
+    return total;
+};
+
+fiber:i: c = counter(4);
+i: result = drain(c);
+>! result;
+i: after = 100;
+>! after;

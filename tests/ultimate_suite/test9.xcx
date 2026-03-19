@@ -1,0 +1,15 @@
+table: users {
+    columns = [id :: i @auto, username :: s]
+    rows = [("alice",), ("bob",), ("carol",)]
+};
+
+table: orders {
+    columns = [order_id :: i @auto, user_id :: i, amount :: f]
+    rows = [(1, 150.0), (1, 220.0), (2, 75.0)]
+};
+
+table: report = users.join(orders, "id", "user_id");
+>! report.count();
+
+table: big_orders = report.where(amount > 100.0);
+>! big_orders.count();

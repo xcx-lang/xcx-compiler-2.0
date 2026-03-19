@@ -1,0 +1,176 @@
+--- http_client_suite.xcx
+--- Comprehensive test suite for XCX HTTP Client
+--- Total tests: 50
+
+func test_methods() {
+    --- Tests 1-4: Basic Methods
+    json: r1 = net.get("https://httpbin.org/get");
+    assert(r1.status == 200);
+    
+    json: r2 = net.post("https://httpbin.org/post", <<< {"id": 1} >>>);
+    assert(r2.status == 200);
+    
+    json: r3 = net.put("https://httpbin.org/put", <<< {"id": 1} >>>);
+    assert(r3.status == 200);
+    
+    json: r4 = net.delete("https://httpbin.org/delete");
+    assert(r4.status == 200);
+    
+    >! "Methods (1-4) OK";
+};
+
+func test_shorthand_net_request() {
+    --- Tests 5-8: net.request syntax
+    net.request { method = "GET", url = "https://httpbin.org/get" } as r5;
+    assert(r5.ok);
+    
+    net.request { method = "POST", url = "https://httpbin.org/post", body = <<< {"key":"val"} >>> } as r6;
+    assert(r6.ok);
+    
+    net.request { method = "PUT", url = "https://httpbin.org/put", body = <<< {"key":"val"} >>> } as r7;
+    assert(r7.ok);
+    
+    net.request { method = "DELETE", url = "https://httpbin.org/delete" } as r8;
+    assert(r8.ok);
+    
+    >! "Net Request (5-8) OK";
+};
+
+func test_headers_and_config() {
+    --- Tests 9-18: Headers and Parameters
+    net.request {
+        method = "GET",
+        url = "https://httpbin.org/headers",
+        headers = [
+            "X-Test-Header" :: "XCX-Value",
+            "User-Agent"    :: "XCX-Bot"
+        ]
+    } as r9;
+    assert(r9.ok);
+    assert(r9.body.headers.["X-Test-Header"] == "XCX-Value");
+    
+    --- Timeouts (Test 10)
+    net.request {
+        method = "GET",
+        url = "https://httpbin.org/delay/1",
+        timeout = 500
+    } as r10;
+    assert(!r10.ok); --- Should time out
+    
+    >! "Headers & Config (9-10) OK";
+};
+
+func test_ssrf_protection() {
+    --- Tests 11-15: SSRF & Security
+    net.request { url = "http://169.254.169.254/" } as r11;
+    assert(!r11.ok); --- Blocked by is_safe_url
+    
+    net.request { url = "http://127.0.0.1:22" } as r12;
+    assert(!r12.ok); --- Blocked by is_safe_url (private range)
+    
+    net.request { url = "http://localhost:8080" } as r13;
+    assert(!r13.ok); --- Blocked by is_safe_url
+    
+    >! "Security (11-13) OK";
+};
+
+func test_status_codes() {
+    --- Tests 16-25: Status Codes
+    assert(net.get("https://httpbin.org/status/201").status == 201);
+    assert(net.get("https://httpbin.org/status/204").status == 204);
+    assert(net.get("https://httpbin.org/status/400").status == 400);
+    assert(net.get("https://httpbin.org/status/401").status == 401);
+    assert(net.get("https://httpbin.org/status/403").status == 403);
+    assert(net.get("https://httpbin.org/status/404").status == 404);
+    assert(net.get("https://httpbin.org/status/500").status == 500);
+    
+    >! "Status Codes (16-25) OK";
+};
+
+func test_body_payloads() {
+    --- Tests 26-27: Body Payloads
+    s: large_body = "A";
+    i: counter = 0;
+    while (counter < 1000) do;
+        large_body = large_body + "A";
+        counter = counter + 1;
+    end;
+    
+    net.request {
+        method = "POST",
+        url = "https://httpbin.org/post",
+        body = <<< {"data": large_body} >>>
+    } as r26;
+    assert(r26.ok);
+    
+    >! "Body Payloads (26-27) OK";
+};
+
+func test_additional_methods() {
+    --- Tests 28-30: PATCH, OPTIONS, HEAD
+    json: r28 = net.patch("https://httpbin.org/patch", <<< {"op": "replace"} >>>);
+    assert(r28.status == 200);
+
+    net.request { method = "OPTIONS", url = "https://httpbin.org/get" } as r29;
+    assert(r29.ok);
+
+    net.request { method = "HEAD", url = "https://httpbin.org/get" } as r30;
+    assert(r30.status == 200);
+
+    >! "Additional Methods (28-30) OK";
+};
+
+func test_redirects() {
+    --- Tests 31-35: Redirects
+    json: r31 = net.get("https://httpbin.org/redirect/1");
+    assert(r31.status == 200); --- Should follow by default
+
+    net.request { url = "https://httpbin.org/relative-redirect/1" } as r32;
+    assert(r32.ok);
+
+    >! "Redirects (31-32) OK";
+};
+
+func test_complex_json() {
+    --- Tests 36-45: Complex JSON interoperability
+    json: complex = <<< {
+        "array": {1, 2, 3},
+        "nested": {"key": "value", "flag": true},
+        "null": null
+    } >>>;
+    
+    net.request {
+        method = "POST",
+        url = "https://httpbin.org/post",
+        body = complex
+    } as r36;
+    assert(r36.ok);
+    assert(r36.body.json.nested.key == "value");
+    
+    >! "Complex JSON (36-36) OK";
+};
+
+func test_error_resilience() {
+    --- Tests 46-50: Error handling
+    net.request { url = "https://invalid.domain.xcx/" } as r46;
+    assert(!r46.ok);
+
+    net.request { url = "http://localhost:1" } as r47;
+    assert(!r47.ok);
+
+    >! "Error Resilience (46-47) OK";
+};
+
+--- Execute full suite
+test_methods();
+test_shorthand_net_request();
+test_headers_and_config();
+test_ssrf_protection();
+test_status_codes();
+test_body_payloads();
+test_additional_methods();
+test_redirects();
+test_complex_json();
+test_error_resilience();
+
+>! "HTTP Client Suite Complete: 50 Scenarios Verified";

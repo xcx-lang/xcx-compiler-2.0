@@ -1,0 +1,2 @@
+--- tests/xcx/terminal_run_helper.xcx
+>! "Hello from helper!";

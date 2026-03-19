@@ -1,0 +1,11 @@
+func parse_user(s: raw -> s) {
+    json: data = json.parse(raw);
+    s: name;
+    data.bind("name", name);
+    s: role;
+    data.bind("role", role);
+    return name + ":" + role;
+};
+
+s: result = parse_user("{\"name\":\"Alice\",\"role\":\"admin\"}");
+>! result;

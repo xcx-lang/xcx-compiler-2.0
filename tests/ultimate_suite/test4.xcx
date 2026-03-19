@@ -1,0 +1,16 @@
+fiber inner(i: x -> i) {
+    yield x * 2;
+    yield x * 3;
+};
+
+fiber outer(i: val -> i) {
+    fiber:i: sub = inner(val);
+    i: a = sub.next();
+    yield a;
+    i: b = sub.next();
+    yield b;
+};
+
+fiber:i: f = outer(5);
+>! f.next();
+>! f.next();

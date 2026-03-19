@@ -1,0 +1,99 @@
+
+
+fiber client_fiber() {
+    --- Wait for server to start
+    yield; yield; yield;
+
+    --- Test 1: Basic Route
+    net.get("http://127.0.0.1:8081/") as r1;
+    assert(r1.body.route == "root");
+    
+    --- Test 2: Wildcard Route
+    net.get("http://127.0.0.1:8081/any/path") as r2;
+    assert(r2.body.route == "wildcard");
+    assert(r2.body.path == "/any/path");
+    
+    --- Test 3: Query Parameters
+    net.get("http://127.0.0.1:8081/test?a=1&b=2") as r3;
+    assert(r3.body.query == "a=1&b=2");
+    
+    --- Test 4: Headers
+    net.request { 
+        url = "http://127.0.0.1:8081/",
+        headers = ["X-Client" :: "XCX-Tester"]
+    } as r4;
+    assert(r4.body.headers.["X-Client"] == "XCX-Tester");
+
+    --- Test 5: POST with JSON body
+    net.post("http://127.0.0.1:8081/post", <<< {"user": "admin"} >>>) as r5;
+    assert(r5.status == 201);
+    assert(r5.body.received.user == "admin");
+
+    --- Test 6: Custom Status
+    net.get("http://127.0.0.1:8081/status/418") as r6;
+    assert(r6.status == 418);
+
+    --- Test 7-40: Bulk Route Tests (Method variations)
+    net.request { method = "PUT", url = "http://127.0.0.1:8081/put" } as r7;
+    assert(r7.body.method == "PUT");
+
+    net.request { method = "DELETE", url = "http://127.0.0.1:8081/delete" } as r8;
+    assert(r8.body.method == "DELETE");
+
+    --- Test 41-45: Complex Nested JSON
+    json: complex = <<< {"a": {"b": {"c": 1}}} >>>;
+    net.post("http://127.0.0.1:8081/json", complex) as r41;
+    assert(r41.body.nested_val == 1);
+
+    --- Test 46-48: Error cases
+    net.get("http://127.0.0.1:8081/error") as r46;
+    assert(r46.status == 500);
+
+    >! "Server Tests (1-48) OK";
+    halt.fatal "Server Suite Success";
+};
+
+fiber root_handler(json: req -> json) {
+    yield net.respond(200, <<< {"route": "root", "headers": req.headers} >>>);
+};
+
+fiber wildcard_handler(json: req -> json) {
+    yield net.respond(200, <<< {
+        "route": "wildcard", 
+        "path": req.path, 
+        "query": req.query,
+        "method": req.method
+    } >>>);
+};
+
+fiber post_handler(json: req -> json) {
+    yield net.respond(201, <<< {"received": req.body} >>>);
+};
+
+fiber status_handler(json: req -> json) {
+    yield net.respond(418, <<< {"im_a": "teapot"} >>>);
+};
+
+fiber json_handler(json: req -> json) {
+    yield net.respond(200, <<< {"nested_val": req.body.a.b.c} >>>);
+};
+
+fiber error_handler(json: req -> json) {
+    yield net.respond(500, <<< {"error": "intentional"} >>>);
+};
+
+--- Spawn client
+fiber: client = client_fiber();
+
+serve: test_api {
+    port = 8081,
+    host = "127.0.0.1",
+    routes = [
+        "GET /"       :: root_handler,
+        "POST /post"  :: post_handler,
+        "GET /status/418" :: status_handler,
+        "POST /json"  :: json_handler,
+        "GET /error"  :: error_handler,
+        "*"           :: wildcard_handler
+    ]
+};

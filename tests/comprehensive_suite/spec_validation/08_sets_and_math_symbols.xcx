@@ -1,0 +1,51 @@
+---=============================================================================
+--- 08. SETS & MATH SYMBOLS
+--- VALIDATES: N/Z/Q/S/B/C, range, @step, UNION/∪, INTERSECTION/∩, DIFFERENCE/\, SYMMETRIC_DIFFERENCE/⊕
+---=============================================================================
+
+>! "Testing Sets & Math Symbols...";
+
+set:N: n_set {1,,5}; --- {1,2,3,4,5}
+set:Z: z_set {-2,,2}; --- {-2,-1,0,1,2}
+set:Q: q_set {0.0,,1.0 @step 0.5}; --- {0.0, 0.5, 1.0}
+set:C: c_set {"A",,"C"}; --- {"A", "B", "C"}
+
+if (n_set.size() == 5 AND z_set.contains(0) AND q_set.size() == 3 AND c_set.size() == 3) then;
+    >! "Set Construction & Ranges: OK";
+else;
+    halt.error >! "Set Construction: FAILED";
+end;
+
+set:N: s1 {1,,10};
+set:N: s2 {5,,15};
+
+--- Check Aliases
+set:N: u1 = s1 UNION s2;
+set:N: u2 = s1 ∪ s2;
+set:N: i1 = s1 INTERSECTION s2;
+set:N: i2 = s1 ∩ s2;
+set:N: d1 = s1 DIFFERENCE s2;
+set:N: d2 = s1 \ s2;
+set:N: sd1 = s1 SYMMETRIC_DIFFERENCE s2;
+set:N: sd2 = s1 ⊕ s2;
+
+if (u1.size() == 15 AND u1 == u2 AND i1.size() == 6 AND i1 == i2) then;
+    >! "Set Operations (Standard & Symbols): OK";
+else;
+    halt.error >! "Set logic/symbols: FAILED";
+end;
+
+if (d1.size() == 4 AND d1 == d2 AND sd1.size() == 9 AND sd1 == sd2) then;
+    >! "Set advanced diffs: OK";
+else;
+    halt.error >! "Set diff symbols: FAILED";
+end;
+
+i: choice = random.choice from n_set;
+if (n_set.contains(choice)) then;
+    >! "Random choice: OK";
+else;
+    halt.error >! "Random choice: FAILED";
+end;
+
+>! "08. SETS & MATH SYMBOLS: SUCCESS";

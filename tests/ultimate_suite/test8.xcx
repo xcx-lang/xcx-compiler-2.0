@@ -1,0 +1,10 @@
+--- Symulacja: tworzymy request ręcznie i sprawdzamy handler logicznie
+fiber handle_ping(json: req -> json) {
+    s: method;
+    req.bind("method", method);
+    json: resp <<< {"pong": true, "method": ""} >>>;
+    resp.set("method", method);
+    yield net.respond(200, resp);
+};
+
+>! "handler zdefiniowany poprawnie";

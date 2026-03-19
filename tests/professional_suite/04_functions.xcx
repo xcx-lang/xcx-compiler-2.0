@@ -1,0 +1,33 @@
+
+func add(i: a, i: b -> i) {
+    return a + b;
+};
+
+if (add(5, 10) != 15) then;
+    halt.error >! "Function call failed";
+end;
+
+
+func factorial(i: n -> i) {
+    if (n <= 1) then;
+        return 1;
+    else;
+        return n * factorial(n - 1);
+    end;
+};
+
+if (factorial(5) != 120) then;
+    halt.error >! "Recursion failed";
+end;
+
+
+i: side_effect = 0;
+func do_something() {
+    side_effect = 100;
+};
+do_something();
+if (side_effect != 100) then;
+    halt.error >! "Void function side effect failed";
+end;
+
+>! "Functions test passed";

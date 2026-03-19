@@ -1,0 +1,16 @@
+fiber gen(i: max -> i) {
+    for i in 1 to max do;
+        yield i;
+    end;
+};
+
+fiber:i: f = gen(3);
+b: started = f.isDone();   
+>! "isDone przed pętlą: " + started;
+
+i: count = 0;
+for val in f do;
+    count = count + 1;
+    >! "val: " + val;
+end;
+>! "count: " + count;

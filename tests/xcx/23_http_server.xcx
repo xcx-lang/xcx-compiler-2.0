@@ -1,0 +1,15 @@
+fiber handler(json: req -> json) {
+    >! "Received Request: " + req.method + " " + req.path;
+    
+    yield net.respond(200, <<< {"success": true} >>>);
+};
+
+serve: api {
+    port    = 8080,
+    host    = "127.0.0.1",
+    workers = 1,
+    routes  = [
+        "GET /" :: handler,
+        "*"     :: handler
+    ]
+};

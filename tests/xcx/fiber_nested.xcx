@@ -1,0 +1,18 @@
+--- Fiber Recursion Test
+
+fiber recursive(i: n -> i) {
+    if (n <= 0) then;
+        return 0;
+    end;
+    yield n;
+    
+    fiber:i: f_sub = recursive(n - 1);
+    while (f_sub.isDone() == false) do;
+        yield f_sub.next();
+    end;
+};
+
+fiber:i: f = recursive(3);
+while (f.isDone() == false) do;
+    >! f.next();
+end;

@@ -1,0 +1,32 @@
+table: log {
+    columns = [entry_id :: i @auto, msg :: s, score :: i]
+    rows = [EMPTY]
+};
+
+fiber:i: processor(array:s: items -> i) {
+    i: idx = 0;
+    i: total = 0;
+    while (idx < items.size()) do;
+        s: item = items.get(idx);
+        i: score = item.length;
+        log.insert(item, score);
+        total = total + score;
+        yield total;
+        idx = idx + 1;
+    end;
+};
+
+array:s: words {"hello", "world", "xcx"};
+fiber:i: proc = processor(words);
+
+i: running = 0;
+for partial in proc do;
+    running = partial;
+    >! "partial sum: " + partial;
+end;
+
+>! "final: " + running;
+>! "log entries: " + log.count();
+
+table: long_words = log.where(score > 3);
+>! "long words: " + long_words.count();

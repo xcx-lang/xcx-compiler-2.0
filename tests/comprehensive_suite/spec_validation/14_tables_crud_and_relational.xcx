@@ -1,0 +1,52 @@
+---=============================================================================
+--- 14. TABLES CRUD & RELATIONAL
+--- VALIDATES: @auto, crud, where, join (lambdas)
+---=============================================================================
+
+>! "Testing Tables...";
+
+table: users {
+    columns = [
+        uid :: i @auto,
+        name :: s
+    ]
+    rows = [
+        ("Alice"),
+        ("Bob")
+    ]
+};
+
+if (users.count() == 2 AND users[0].uid == 1 AND users[1].name == "Bob") then;
+    >! "Table Init: OK";
+else;
+    halt.error >! "Table Init: FAILED";
+end;
+
+users.insert("Charlie");
+if (users.count() == 3 AND users[2].uid == 3) then;
+    >! "Table Insert: OK";
+else;
+    halt.error >! "Table Insert: FAILED";
+end;
+
+table: filtered = users.where(name HAS "A");
+if (filtered.count() == 1 AND filtered[0].name == "Alice") then;
+    >! "Table Where (HAS): OK";
+else;
+    halt.error >! "Table Where: FAILED";
+end;
+
+--- Relational Join (Key based)
+table: logs {
+    columns = [ id :: i @auto, user_id :: i, msg :: s ]
+    rows = [ (1, "Login"), (2, "Logout") ]
+};
+
+table: joined = users.join(logs, "uid", "user_id");
+if (joined.count() == 2) then;
+    >! "Table Join (Key): OK";
+else;
+    halt.error >! "Table Join: FAILED";
+end;
+
+>! "14. TABLES CRUD & RELATIONAL: SUCCESS";

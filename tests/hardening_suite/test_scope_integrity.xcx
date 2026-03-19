@@ -1,0 +1,62 @@
+--- test_scope_integrity.xcx
+
+i: x = 100;
+i: global_y = 500;
+
+>! "[Hardening] Starting Scope Integrity Test...";
+
+if (true) then;
+    i: x = 200; --- shadows global x
+    if (true) then;
+        i: x = 300; --- shadows intermediate x
+        if (true) then;
+            i: x = 400; --- shadows inner x
+            >! "[Hardening] Deeply nested x: " + x;
+            if (x != 400) then; halt.error >! "Shadowing level 3 FAIL"; end;
+        end;
+        >! "[Hardening] Shadowing level 2 x: " + x;
+        if (x != 300) then; halt.error >! "Shadowing level 2 FAIL"; end;
+    end;
+    >! "[Hardening] Shadowing level 1 x: " + x;
+    if (x != 200) then; halt.error >! "Shadowing level 1 FAIL"; end;
+end;
+
+>! "[Hardening] Global x: " + x;
+if (x != 100) then; halt.error >! "Global scope FAIL"; end;
+
+--- 2. Loop Scope
+i: counter = 0;
+while (counter < 3) do;
+    i: loop_var = counter * 10;
+    counter = counter + 1;
+    if (counter == 3) then;
+        >! "[Hardening] Loop internal var: " + loop_var;
+        if (loop_var != 20) then; halt.error >! "Loop scope FAIL"; end;
+    end;
+end;
+
+--- 3. Function Scope
+func test_scoped_access(i: param_x -> i) {
+    --- param_x is a parameter
+    if (true) then;
+        i: param_x = 999;
+        return param_x; --- should return the most local param_x
+    end;
+    return param_x;
+};
+
+i: res = test_scoped_access(10);
+>! "[Hardening] Function shadowing result: " + res;
+if (res != 999) then; halt.error >! "Function scope FAIL"; end;
+
+--- 4. Global access inside deep nesting
+if (true) then;
+    if (true) then;
+        if (true) then;
+            >! "[Hardening] Global access from depth: " + global_y;
+            if (global_y != 500) then; halt.error >! "Global access FAIL"; end;
+        end;
+    end;
+end;
+
+>! "[Hardening] All Scope Integrity Tests: PASS";

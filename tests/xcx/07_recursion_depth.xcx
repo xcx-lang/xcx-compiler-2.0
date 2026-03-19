@@ -1,0 +1,18 @@
+func countdown(i: n -> i) {
+    if (n <= 0) then;
+        return 0;
+    end;
+    return countdown(n - 1);
+};
+
+i: r10 = countdown(10);
+>! "countdown(10) = " + r10;
+
+i: r50 = countdown(50);
+>! "countdown(50) = " + r50;
+
+if (r50 == 0) then;
+    >! "Stack depth test passed";
+else;
+    >! "Stack depth test FAILED";
+end;

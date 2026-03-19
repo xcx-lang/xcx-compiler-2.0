@@ -1,0 +1,14 @@
+fiber gen(i: max -> i) {
+    for i in 1 to max do;
+        if (i == 3) then;
+            return 99;
+        end;
+        yield i;
+    end;
+};
+
+fiber:i: f = gen(5);
+>! f.next();    
+>! f.next();    
+>! f.next();    
+>! f.isDone();  

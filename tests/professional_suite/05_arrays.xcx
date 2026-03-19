@@ -1,0 +1,66 @@
+
+array:i: arr {10, 20, 30, 40};
+if (arr.size() != 4) then;
+    halt.error >! "Array size failed";
+end;
+
+
+if (arr.get(2) != 30) then;
+    halt.error >! "Array get(2) failed";
+end;
+
+
+arr.insert(1, 15);
+
+if (arr.get(1) != 15) then;
+    halt.error >! "Array insert failed";
+end;
+if (arr.size() != 5) then;
+    halt.error >! "Array size after insert failed";
+end;
+
+
+arr.update(0, 5);
+
+if (arr.get(0) != 5) then;
+    halt.error >! "Array update failed";
+end;
+
+
+arr.delete(4);
+
+if (arr.size() != 4) then;
+    halt.error >! "Array delete failed";
+end;
+
+
+if (arr.find(20) != 2) then;
+    halt.error >! "Array find failed";
+end;
+if (arr.find(99) != -1) then;
+    halt.error >! "Array find non-existent failed";
+end;
+
+
+if (!arr.contains(15)) then;
+    halt.error >! "Array contains failed";
+end;
+arr.clear();
+if (arr.size() != 0) then;
+    halt.error >! "Array clear failed";
+end;
+
+
+arr.show(); 
+
+
+array:s: words {"A", "B", "C"};
+s: res = "";
+for w in words do;
+    res = res + w;
+end;
+if (res != "ABC") then;
+    halt.error >! "Array iteration failed";
+end;
+
+>! "Arrays test passed";

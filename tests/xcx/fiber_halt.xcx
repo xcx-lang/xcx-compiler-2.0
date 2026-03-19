@@ -1,0 +1,12 @@
+--- Test that a fiber halt correctly halts the entire VM execution
+fiber stopper(s: msg) {
+    yield;
+    halt.error >! msg;
+};
+
+>! "Start main";
+fiber: f = stopper("HALTING FROM FIBER");
+f.run();
+>! "This will happen";
+f.run();
+>! "This won't happen";

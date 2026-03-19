@@ -1,0 +1,14 @@
+i: lo = 2;
+i: hi = 10;
+i: step = 2;
+
+set:N: evens {lo,,hi @step step};
+>! evens.size();
+
+
+set:N: a {1,,5};
+set:N: b {3,,7};
+set:N: u = a UNION b;
+set:N: i = a INTERSECTION b;
+>! u.size();
+>! i.size();

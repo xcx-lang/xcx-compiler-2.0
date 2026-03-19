@@ -1,0 +1,57 @@
+i: neg_int = -42;
+>! "-42 = " + neg_int;
+
+f: neg_float = -3.14;
+>! "-3.14 = " + neg_float;
+
+i: m1 = 10 % 3;
+>! "10 % 3 = " + m1;
+
+i: m2 = 7 % 7;
+>! "7 % 7 = " + m2;
+
+i: p1 = 2 ^ 10;
+>! "2^10 = " + p1;
+
+i: p2 = 3 ^ 0;
+>! "3^0 = " + p2;
+
+f: fp = 4.0 ^ 0.5;
+>! "4.0^0.5 = " + fp;
+
+f: fadd = 3.0 + 1.5;
+>! "3.0 + 1.5 = " + fadd;
+
+f: fdiv = 10.0 / 4.0;
+>! "10.0 / 4.0 = " + fdiv;
+
+i: phone = 48 ++ 12345;
+>! "48 ++ 12345 = " + phone;
+
+b: gt = 10 > 3;
+b: lt = 3 < 10;
+b: eq = 5 == 5;
+b: neq = 5 != 4;
+b: gte = 10 >= 10;
+b: lte = 3 <= 4;
+>! "10>3: " + gt;
+>! "3<10: " + lt;
+>! "5==5: " + eq;
+>! "5!=4: " + neq;
+>! "10>=10: " + gte;
+>! "3<=4: " + lte;
+
+b: cmp_float = 3.0 > 2.5;
+>! "3.0 > 2.5: " + cmp_float;
+
+b: and_res = (10 > 5) AND (3 < 7);
+b: or_res = (10 < 5) OR (3 < 7);
+b: not_res = !!(10 < 5);
+>! "AND: " + and_res;
+>! "OR: " + or_res;
+>! "NOT: " + not_res;
+
+b: has_at = "user@email.com" HAS "@";
+b: no_at = "user_email.com" HAS "@";
+>! "HAS @: " + has_at;
+>! "NO @: " + no_at;

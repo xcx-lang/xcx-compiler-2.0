@@ -1,0 +1,8 @@
+--- S210: ReturnTypeMismatchInFiber (return; without value in typed fiber)
+
+fiber typed_fiber(-> i) {
+    return;
+};
+
+fiber:i: f = typed_fiber();
+f.next();

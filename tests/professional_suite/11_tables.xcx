@@ -1,0 +1,62 @@
+--- 11_tables.xcx
+--- Testing table structures and relational operations according to Spec Section 17.
+
+table: users {
+    columns = [
+        id :: i @auto,
+        name :: s,
+        age :: i
+    ]
+    rows = [
+        ("Alice", 30),
+        ("Bob", 25)
+    ]
+};
+
+--- count()
+if (users.count() != 2) then;
+    halt.error >! "Table count failed";
+end;
+
+--- .insert()
+users.insert("Charlie", 35);
+if (users.count() != 3) then;
+    halt.error >! "Table insert failed";
+end;
+
+--- Accessing rows
+if (users[0].name != "Alice") then;
+    halt.error >! "Table index access failed";
+end;
+
+--- .update()
+users.update(1, ["Bobby", 26]);
+if (users[1].name != "Bobby") then;
+    halt.error >! "Table update failed";
+end;
+
+--- .where()
+table: over_30 = users.where(age >= 30);
+if (over_30.count() != 2) then;
+    halt.error >! "Table .where() failed";
+end;
+
+--- .join()
+table: roles {
+    columns = [
+        user_id :: i,
+        role_name :: s
+    ]
+    rows = [
+        (1, "Admin"),
+        (2, "User"),
+        (3, "Guest")
+    ]
+};
+
+table: user_roles = users.join(roles, "id", "user_id");
+if (user_roles.count() != 3) then;
+    halt.error >! "Table .join() failed";
+end;
+
+>! "Tables test passed";

@@ -1,0 +1,43 @@
+---=============================================================================
+--- 16. FIBERS & YIELD LOGIC
+--- VALIDATES: Typed/Void, isDone, for-in fiber, return in fiber
+---=============================================================================
+
+>! "Testing Fibers...";
+
+fiber count_to(i: max -> i) {
+    for i in 1 to max do;
+        yield i;
+    end;
+    return 99;
+};
+
+fiber:i: f = count_to(2);
+
+if (f.isDone() == false) then;
+    if (f.next() == 1 AND f.next() == 2) then;
+        if (f.next() == 99 AND f.isDone()) then;
+            >! "Fiber flow (yield/return/isDone): OK";
+        else;
+            halt.error >! "Fiber return/done mismatch";
+        end;
+    else;
+        halt.error >! "Fiber yielding mismatch";
+    end;
+else;
+    halt.error >! "Fiber init failed";
+end;
+
+fiber:i: f2 = count_to(3);
+i: f_sum = 0;
+for v in f2 do;
+    f_sum = f_sum + v;
+end;
+
+if (f_sum == 105) then; --- 1 + 2 + 3 + 99 = 105
+    >! "Fiber For-In: OK";
+else;
+    halt.error >! "Fiber For-In FAILED (" + f_sum + ")";
+end;
+
+>! "16. FIBERS & YIELD LOGIC: SUCCESS";

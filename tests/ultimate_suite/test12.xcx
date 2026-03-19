@@ -1,0 +1,9 @@
+s: raw = "  Hello, World!  ";
+s: result = raw.trim().lower().replace("hello", "hi").replace("world", "xcx");
+>! result;
+
+s: sliced = "Programming".slice(0, 4).upper();
+>! sliced;
+
+b: check = "admin@xcx.pl".startsWith("admin") AND "main.xcx".endsWith(".xcx");
+>! check;

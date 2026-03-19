@@ -1,0 +1,16 @@
+fiber infinite(-> i) {
+    i: n = 0;
+    while (true) do;
+        n = n + 1;
+        yield n;
+    end;
+};
+
+fiber:i: f = infinite();
+i: first = 0;
+for val in f do;
+    first = val;
+    break;
+end;
+>! first;
+>! f.isDone();

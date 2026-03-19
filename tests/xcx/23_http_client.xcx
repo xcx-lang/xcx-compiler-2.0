@@ -1,0 +1,32 @@
+func test_client() {
+    net.request {
+        method  = "GET",
+        url     = "https://httpbin.org/get"
+    } as resp;
+
+    if (resp.status == 200) then;
+        >! "GET Success";
+    else;
+        >! "GET Failed: " + resp.status;
+    end;`
+
+    net.request {
+        method  = "POST",
+        url     = "https://httpbin.org/post",
+        body    = <<< {"test": "data"} >>>
+    } as resp2;
+
+    if (resp2.ok) then;
+        >! "POST Success";
+    else;
+        >! "POST Failed";
+    end;
+    
+    s: url = "https://httpbin.org/get";
+    json: res = net.get(url);
+    if (res.status == 200) then;
+        >! "Net.get Success";
+    end;
+};
+
+test_client();

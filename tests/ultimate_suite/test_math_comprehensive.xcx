@@ -1,0 +1,70 @@
+include "../../lib/math.xcx" as math;
+
+>! "=== [1] Constants ===";
+>! "PI: " + math.PI;
+>! "E:  " + math.E;
+>! "SQRT2: " + math.SQRT2;
+
+>! "";
+>! "=== [2] Basic Integer ===";
+>! "abs_i(-10): " + math.abs_i(-10);
+>! "min_i(5, 12): " + math.min_i(5, 12);
+>! "max_i(5, 12): " + math.max_i(5, 12);
+>! "clamp_i(20, 0, 10): " + math.clamp_i(20, 0, 10);
+>! "sign_i(-5): " + math.sign_i(-5);
+
+>! "";
+>! "=== [3] Basic Float ===";
+>! "abs_f(-3.14): " + math.abs_f(-3.14);
+>! "floor_f(3.7): " + math.floor_f(3.7);
+>! "ceil_f(3.2): " + math.ceil_f(3.2);
+>! "round_f(3.5): " + math.round_f(3.5);
+>! "frac(3.14): " + math.frac(3.14);
+>! "lerp(0.0, 10.0, 0.5): " + math.lerp(0.0, 10.0, 0.5);
+
+>! "";
+>! "=== [4] Powers & Roots ===";
+>! "pow_i(2, 10): " + math.pow_i(2, 10);
+>! "pow_f(2.0, -2): " + math.pow_f(2.0, -2);
+>! "sqrt_f(16.0): " + math.sqrt_f(16.0);
+>! "cbrt_f(27.0): " + math.cbrt_f(27.0);
+>! "hypot(3.0, 4.0): " + math.hypot(3.0, 4.0);
+
+>! "";
+>! "=== [5] Logarithms ===";
+>! "exp_f(1.0): " + math.exp_f(1.0);
+>! "ln_f(math.E): " + math.ln_f(math.E);
+>! "log10_f(100.0): " + math.log10_f(100.0);
+
+>! "";
+>! "=== [6] Trigonometry ===";
+>! "sin_f(math.PI / 2.0): " + math.sin_f(math.PI / 2.0);
+>! "cos_f(0.0): " + math.cos_f(0.0);
+>! "tan_f(math.PI / 4.0): " + math.tan_f(math.PI / 4.0);
+>! "atan2_f(1.0, 1.0): " + math.atan2_f(1.0, 1.0);
+
+>! "";
+>! "=== [7] Number Theory ===";
+>! "gcd(48, 18): " + math.gcd(48, 18);
+>! "lcm(4, 6): " + math.lcm(4, 6);
+>! "is_prime(17): " + math.is_prime(17);
+>! "factorial(5): " + math.factorial(5);
+>! "fibonacci(10): " + math.fibonacci(10);
+>! "reverse_int(1234): " + math.reverse_int(1234);
+>! "is_palindrome_int(121): " + math.is_palindrome_int(121);
+
+>! "";
+>! "=== [8] Statistics ===";
+array:f: data = {10.0, 20.0, 30.0, 40.0, 50.0};
+>! "mean(data): " + math.mean(data);
+>! "variance(data): " + math.variance(data);
+>! "std_dev(data): " + math.std_dev(data);
+>! "min_arr(data): " + math.min_arr(data);
+>! "max_arr(data): " + math.max_arr(data);
+>! "median(data): " + math.median(data);
+
+>! "";
+>! "=== [9] Unit Converters ===";
+>! "km_to_miles(10.0): " + math.km_to_miles(10.0);
+>! "celsius_to_f(0.0): " + math.celsius_to_f(0.0);
+>! "kg_to_lbs(5.0): " + math.kg_to_lbs(5.0);

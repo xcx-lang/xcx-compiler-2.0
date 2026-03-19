@@ -1,0 +1,15 @@
+--- 08_halt_system.xcx
+--- Testing halt.alert and control flow of error handling according to Spec Section 12.
+
+--- halt.alert does not stop execution
+halt.alert >! "This is an alert - should continue";
+>! "Continuing after alert...";
+
+--- halt.error stops current block (or function)
+func test_error() {
+    halt.error >! "This error should stop the function";
+    halt.fatal >! "SHOULD NOT REACH FATAL";
+};
+
+
+>! "Halt system test (partial) passed";

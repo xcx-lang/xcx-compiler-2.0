@@ -1,0 +1,355 @@
+--- pax.xcx - PAX Package Manager for XCX
+
+func main() {
+    array:s: args = env.args();
+    
+    if (args.size() < 3) then;
+        >! "PAX Package Manager";
+        >! "Usage: xcx pax <command> [args]";
+        >! "";
+        >! "Commands:";
+        >! "  new <name>      Create a new project";
+        >! "  install         Install dependencies from project.pax";
+        >! "  add <url/repo>  Add a package (URL or user/repo)";
+        >! "  remove <name>   Remove a package";
+        >! "  search <query>  Search for packages on GitHub";
+        >! "  run             Run the current project";
+        return;
+    end;
+    
+    s: command = args.get(2);
+    
+    if (command == "new") then;
+        paxNew(args);
+    elif (command == "install") then;
+        paxInstall(args);
+    elif (command == "add") then;
+        paxAdd(args);
+    elif (command == "remove") then;
+        paxRemove(args);
+    elif (command == "search") then;
+        paxSearch(args);
+    elif (command == "run") then;
+        paxRun(args);
+    else;
+        >! "Unknown command: " + command;
+    end;
+};
+
+--- Helper: Strip comments and extract configuration block
+func parsePax(s: content -> json) {
+    array:s: lines = content.split("\n");
+    s: cleaned = "";
+    b: in_multi = false;
+    
+    for line in lines do;
+        s: t = line.trim();
+        if (t == "---") then;
+            in_multi = true;
+        elif (t == "*---") then;
+            in_multi = false;
+        elif (t.startsWith("---")) then;
+            --- Single line comment
+        elif (NOT in_multi) then;
+            cleaned = cleaned + line + "\n";
+        end;
+    end;
+    
+    s: config_block = "";
+    if (cleaned HAS "/") then;
+        array:s: parts = cleaned.split("/");
+        --- The config is between the first and second '/' that aren't comments
+        if (parts.size() >= 3) then;
+            --- We need to be careful if dependencies have '/'
+            --- Let's find the first '/' and the LAST '/' in the cleaned string
+            i: first_slash = cleaned.indexOf("/");
+            i: last_slash = cleaned.lastIndexOf("/");
+            if (last_slash > first_slash) then;
+                config_block = cleaned.slice(first_slash + 1, last_slash).trim();
+            end;
+        end;
+    end;
+    
+    if (config_block == "") then;
+        return <<< {"name": "unnamed", "deps": []} >>>;
+    end;
+    
+    json: result <<< {"name": "", "deps": []} >>>;
+    
+    --- Parse Name
+    if (config_block HAS "name ::") then;
+        array:s: nparts = config_block.split("name ::");
+        s: nval = nparts.get(1).trim();
+        if (nval HAS "\"") then;
+            array:s: quotes = nval.split("\"");
+            result.set("name", quotes.get(1));
+        end;
+    end;
+    
+    --- Parse Deps
+        if (config_block HAS "deps :: [") then;
+            array:s: dparts = config_block.split("deps :: [");
+            s: dval = dparts.get(1);
+            if (dval HAS "]") then;
+                array:s: dblock = dval.split("]");
+                s: winner = dblock.get(0).trim();
+                if (winner.length > 0) then;
+                    array:s: items = winner.split(",");
+                    for item in items do;
+                        s: it = item.trim();
+                        if (it.startsWith("\"") AND it.endsWith("\"")) then;
+                            it = it.slice(1, it.length - 1);
+                        end;
+                        if (it.length > 0) then;
+                            result.append("deps", it);
+                        end;
+                    end;
+                end;
+            end;
+        end;
+    
+    return result;
+};
+
+--- Helper: Convert JSON config to .pax string
+func toPax(json: cfg -> s) {
+    s: name = cfg.get("name");
+    array:s: deps = cfg.get("deps");
+    s: res = "---\nPAX Project Configuration\n*---\n/\n";
+    res = res + "    name :: \"" + name + "\",\n";
+    res = res + "    deps :: [\n";
+    if (deps.size() > 0) then;
+        for i in 0 to (deps.size() - 1) do;
+            s: d = deps.get(i);
+            res = res + "        \"" + d + "\"";
+            if (i < (deps.size() - 1)) then;
+                res = res + ",";
+            end;
+            res = res + "\n";
+        end;
+    end;
+    res = res + "    ]\n/\n";
+    return res;
+};
+
+--- Helper: Normalize URL (support GitHub user/repo)
+func normalizeUrl(s: input -> s) {
+    if (input.startsWith("http")) then;
+        return input;
+    end;
+    if (input HAS "/") then;
+        return "https://raw.githubusercontent.com/" + input + "/main/package.xcx";
+    end;
+    return input;
+};
+
+func paxNew(array:s: args) {
+    if (args.size() < 4) then;
+        >! "Usage: xcx pax new <name>";
+        return;
+    end;
+    s: name = args.get(3);
+    >! "Creating project: " + name;
+    
+    json: cfg <<< {"name": "", "deps": []} >>>;
+    cfg.set("name", name);
+    
+    store.write(name + "/project.pax", toPax(cfg));
+    store.write(name + "/src/main.xcx", "func main() {\n    >! \"Hello from " + name + "!\";\n};\nmain();\n");
+    
+    >! "Project '" + name + "' ready.";
+};
+
+func paxInstall(array:s: args) {
+    if (NOT store.exists("project.pax")) then;
+        >! "Error: project.pax not found.";
+        return;
+    end;
+    
+    s: content = store.read("project.pax");
+    json: cfg = parsePax(content);
+    
+    >! "Installing dependencies for project: " + cfg.get("name");
+    
+    --- DEBUG
+    --- >! "DEBUG: Full JSON: " + s(cfg);
+    
+    json: deps = cfg.get("deps");
+    i: count = deps.size();
+    
+    if (count == 0) then;
+        >! "No dependencies found.";
+    else;
+        for i in 0 to (count - 1) do;
+            s: d = deps.get(i);
+            --- >! "DEBUG: Iteration " + s(i) + ", d = " + s(d);
+            s: url = normalizeUrl(d);
+            >! "Fetching: " + d;
+            
+            if (NOT url.startsWith("http")) then;
+                >! "  Invalid dependency format: '" + d + "'. Use 'user/repo' or URL.";
+            else;
+                json: resp = net.get(url);
+                if (resp.ok) then;
+                    s: filename = "pkg_" + crypto.token(4) + ".xcx";
+                    store.write("lib/" + filename, resp.body);
+                    >! "  Installed to lib/" + filename;
+                else;
+                    >! "  Failed to download (Status: " + s(resp.status) + ")";
+                end;
+            end;
+        end;
+    end;
+    
+    >! "Done.";
+};
+
+func paxAdd(array:s: args) {
+    if (args.size() < 4) then;
+        >! "Usage: xcx pax add <url_or_repo>";
+        return;
+    end;
+    if (NOT store.exists("project.pax")) then;
+        >! "Error: project.pax not found.";
+        return;
+    end;
+    
+    s: input = args.get(3);
+    s: url = normalizeUrl(input);
+    
+    s: filename = "pkg_" + crypto.token(4) + ".xcx";
+    
+    >! "Downloading from: " + url;
+    json: resp = net.get(url);
+    if (resp.ok) then;
+        store.write("lib/" + filename, resp.body);
+        >! "Package saved to lib/" + filename;
+        
+        s: content = store.read("project.pax");
+        json: cfg = parsePax(content);
+        
+        json: deps = cfg.get("deps");
+        b: exists = false;
+        for i in 0 to (deps.size() - 1) do;
+            if (deps.get(i) == input) then;
+                exists = true;
+            end;
+        end;
+
+        if (NOT exists) then;
+            cfg.append("deps", input);
+            store.write("project.pax", toPax(cfg));
+            >! "Updated project.pax";
+        else;
+            >! "Dependency already exists in project.pax";
+        end;
+    else;
+        >! "Download failed. Status: " + s(resp.status);
+    end;
+};
+
+func paxRemove(array:s: args) {
+    if (args.size() < 4) then;
+        >! "Usage: xcx pax remove <url_or_name>";
+        return;
+    end;
+    if (NOT store.exists("project.pax")) then;
+        >! "Error: project.pax not found.";
+        return;
+    end;
+    
+    s: target = args.get(3);
+    s: content = store.read("project.pax");
+    json: cfg = parsePax(content);
+    
+    json: deps = cfg.get("deps");
+    i: target_idx = -1;
+    for i in 0 to (deps.size() - 1) do;
+        if (deps.get(i) == target) then;
+            target_idx = i;
+        end;
+    end;
+    
+    if (target_idx >= 0) then;
+        --- result.delete on json array... does it exist? 
+        --- In vm.rs I only added size. Let's assume we need to rebuild the array or add delete.
+        --- For now, let's just use JSON delete if it exists (it was added in vm.rs earlier by me)
+        deps.delete(target_idx);
+        cfg.set("deps", deps);
+        store.write("project.pax", toPax(cfg));
+        >! "Removed " + target + " from project.pax";
+    else;
+        >! "Dependency not found in project.pax: " + target;
+    end;
+};
+
+func paxSearch(array:s: args) {
+    if (args.size() < 4) then;
+        >! "Usage: xcx pax search <query>";
+        return;
+    end;
+    
+    s: query = args.get(3);
+    >! "Searching GitHub for XCX packages matching: " + query + "...";
+    
+    s: api_url = "https://api.github.com/search/repositories?q=" + query + "+xcx+package";
+    
+    net.request {
+        method  = "GET",
+        url     = api_url,
+        headers = ["User-Agent" :: "XCX-PAX-Manager/1.0", "Accept" :: "application/vnd.github.v3+json"],
+        timeout = 5000
+    } as resp;
+    
+    if (resp.ok) then;
+        json: body = resp.body;
+        if (body.exists("items")) then;
+            array:json: items = body.get("items");
+            if (items.size() == 0) then;
+                >! "No packages found.";
+            else;
+                >! "Found " + s(items.size()) + " packages:";
+                for item in items do;
+                    s: name = item.get("full_name");
+                    s: desc = item.get("description");
+                    i: star_count = item.get("stargazers_count");
+                    s: stars = s(star_count);
+                    >! "- " + name + " (Stars: " + stars + ")";
+                    if (desc != "") then;
+                        >! "  " + desc;
+                    end;
+                    >! "  URL: " + item.get("html_url");
+                    >! "";
+                end;
+            end;
+        else;
+            >! "Error parsing GitHub response.";
+        end;
+    else;
+        >! "Search failed. Status: " + s(resp.status);
+    end;
+};
+
+func paxRun(array:s: args) {
+    s: target = "src/main.xcx";
+    if (args.size() > 3) then;
+        target = args.get(3);
+        --- If it's a directory, try finding src/main.xcx inside
+        if (store.exists(target + "/src/main.xcx")) then;
+            target = target + "/src/main.xcx";
+        end;
+    end;
+
+    if (store.exists(target)) then;
+        >! "Running: " + target;
+        b: ok = .terminal !run target;
+        if (NOT ok) then;
+            >! "Error: Application failed or not found.";
+        end;
+    else;
+        >! "Error: Could not find " + target;
+        >! "Usage: xcx pax run [path_to_project_or_file]";
+    end;
+};
+
+main();

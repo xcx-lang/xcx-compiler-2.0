@@ -1,0 +1,69 @@
+i: x = 10;
+i: y = 3;
+
+
+if (x + y != 13) then;
+    halt.error >! "Addition failed";
+end;
+if (x - y != 7)  then;
+    halt.error >! "Subtraction failed";
+end;
+if (x * y != 30) then;
+    halt.error >! "Multiplication failed";
+end;
+if (x / y != 3)  then;
+    halt.error >! "Division failed";
+end;
+if (x % y != 1)  then;
+    halt.error >! "Modulo failed";
+end;
+if (x ^ y != 1000) then;
+    halt.error >! "Power failed";
+end;
+
+--- Integer Concatenation (++)
+i: concat = 12 ++ 34;
+if (concat != 1234) then;
+    halt.error >! "Int concat ++ failed";
+end;
+
+--- Relational
+if (!(x > y)) then;
+    halt.error >! "> failed";
+end;
+if (!(y < x)) then;
+    halt.error >! "< failed";
+end;
+if (!(x == 10)) then;
+    halt.error >! "== failed";
+end;
+if (!(x != y)) then;
+    halt.error >! "!= failed";
+end;
+
+--- Logical (Keywords and Symbols)
+if (true AND false) then;
+    halt.error >! "AND keyword failed";
+end;
+if (true && false) then;
+    halt.error >! "&& operator failed";
+end;
+if (!(true OR false)) then;
+    halt.error >! "OR keyword failed";
+end;
+if (!(true || false)) then;
+    halt.error >! "|| operator failed";
+end;
+if (NOT true) then;
+    halt.error >! "NOT keyword failed";
+end;
+if (!!true == false) then;
+    halt.error >! "!! operator failed";
+end;
+
+--- String HAS
+if (!("hello world" HAS "world")) then;
+    halt.error >! "String HAS failed";
+end;
+
+>! "Operators test passed";

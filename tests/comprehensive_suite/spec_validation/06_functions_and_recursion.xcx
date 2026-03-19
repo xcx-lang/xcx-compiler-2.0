@@ -1,0 +1,25 @@
+---=============================================================================
+--- 06. FUNCTIONS & RECURSION
+--- VALIDATES: Params, return types, recursive depth
+---=============================================================================
+
+>! "Testing Functions & Recursion...";
+
+func power_of_two(i: n -> i) {
+    if (n == 0) then; return 1; end;
+    return 2 * power_of_two(n - 1);
+};
+
+if (power_of_two(10) == 1024) then;
+    >! "Recursive function: OK";
+else;
+    halt.error >! "Recursion logic: FAILED";
+end;
+
+func void_proc(s: msg) {
+    >! "Void proc received: " + msg;
+};
+
+void_proc("Spec Test");
+
+>! "06. FUNCTIONS & RECURSION: SUCCESS";

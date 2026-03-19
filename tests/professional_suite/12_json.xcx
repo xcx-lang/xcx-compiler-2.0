@@ -1,0 +1,46 @@
+--- 12_json.xcx
+--- Testing JSON handling and raw blocks according to Spec Section 18.
+
+--- Raw Blocks
+json: data <<< 
+{
+    "user": {
+        "id": 1,
+        "name": "Antigravity",
+        "active": true
+    },
+    "settings": ["night_mode", "logging"]
+}
+>>>;
+
+--- exists()
+if (!data.exists("user.id")) then;
+    halt.error >! "JSON exists() failed";
+end;
+
+--- bind()
+i: user_id;
+s: user_name;
+b: is_active;
+data.bind("user.id", user_id);
+data.bind("user.name", user_name);
+data.bind("user.active", is_active);
+
+if (user_id != 1) then;
+    halt.error >! "JSON bind(int) failed";
+end;
+if (user_name != "Antigravity") then;
+    halt.error >! "JSON bind(string) failed";
+end;
+if (is_active != true) then;
+    halt.error >! "JSON bind(bool) failed";
+end;
+
+--- parse()
+s: json_raw = "{\"key\":\"value\",\"num\":123}";
+json: parsed = json.parse(json_raw);
+if (!parsed.exists("key")) then;
+    halt.error >! "json.parse() failed";
+end;
+
+>! "JSON test passed";

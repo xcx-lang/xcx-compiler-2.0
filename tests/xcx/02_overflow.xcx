@@ -1,0 +1,17 @@
+i: max_int = 9223372036854775807;
+>! "Max int: " + max_int;
+
+i: big = 999999 * 999999;
+>! "Big multiply: " + big;
+
+f: big_f = 99999999.99;
+>! "Big float: " + big_f;
+
+f: small_f = 0.00001;
+>! "Small float: " + small_f;
+
+i: zero = 0;
+>! "Zero: " + zero;
+
+i: neg = -2147483648;
+>! "Negative: " + neg;

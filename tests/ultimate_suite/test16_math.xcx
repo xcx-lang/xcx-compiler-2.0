@@ -1,0 +1,20 @@
+include "../../lib/math.xcx";
+
+>! "PI: " + PI;
+>! "E: " + E;
+
+i: num = 17;
+if (is_prime(num)) then;
+    >! num + " is prime";
+else;
+    >! num + " is not prime";
+end;
+
+f: val = 16.0;
+>! "sqrt(16.0) = " + sqrt_f(val);
+
+i: fact = factorial(5);
+>! "5! = " + fact;
+
+array:f: data {10.0, 20.0, 30.0};
+>! "mean of {10, 20, 30} = " + mean(data);

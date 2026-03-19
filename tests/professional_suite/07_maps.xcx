@@ -1,0 +1,56 @@
+map: scores {
+    schema = [s <-> i]
+    data = [
+        "john" :: 80,
+        "bob" :: 90
+    ]
+};
+
+if (scores.size() != 2) then;
+    halt.error >! "Map size failed";
+end;
+
+
+if (scores.get("john") != 80) then;
+    halt.error >! "Map get() failed";
+end;
+
+
+scores.insert("alice", 95);
+if (scores.size() != 3) then;
+    halt.error >! "Map insert(new) failed";
+end;
+
+scores.insert("john", 85);
+if (scores.get("john") != 85) then;
+    halt.error >! "Map insert(update) failed";
+end;
+
+
+if (!scores.contains("bob")) then;
+    halt.error >! "Map contains failed";
+end;
+
+
+scores.remove("bob");
+if (scores.contains("bob")) then;
+    halt.error >! "Map remove failed";
+end;
+
+
+array:s: ks = scores.keys();
+array:i: vs = scores.values();
+if (ks.size() != 2) then;
+    halt.error >! "Map keys() failed";
+end;
+if (vs.size() != 2) then;
+    halt.error >! "Map values() failed";
+end;
+
+
+scores.clear();
+if (scores.size() != 0) then;
+    halt.error >! "Map clear failed";
+end;
+
+>! "Maps test passed";

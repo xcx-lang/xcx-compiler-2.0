@@ -1,0 +1,42 @@
+---=============================================================================
+--- 02. MATH & LOGIC ALIASES
+--- VALIDATES: ++, ^, !!, not, and, or, symbols
+---=============================================================================
+
+>! "Testing Math & Logic Aliases...";
+
+i: a = 10;
+i: b = 3;
+
+--- Power operator
+if (a ^ b == 1000) then;
+    >! "Power operator (^): OK";
+else;
+    halt.error >! "Power operator (^): FAILED";
+end;
+
+--- Digit concatenation
+i: phone = 48 ++ 123;
+if (phone == 48123) then;
+    >! "Digit concat (++): OK";
+else;
+    halt.error >! "Digit concat (++): FAILED";
+end;
+
+--- Logic Aliases
+b: t = true;
+b: f = false;
+
+if (t AND t && !!f) then;
+    >! "Logic AND (AND, &&, !!): OK";
+else;
+    halt.error >! "Logic AND aliases: FAILED";
+end;
+
+if (f OR t || (not f)) then;
+    >! "Logic OR/NOT (OR, ||, not): OK";
+else;
+    halt.error >! "Logic OR/NOT aliases: FAILED";
+end;
+
+>! "02. MATH & LOGIC ALIASES: SUCCESS";

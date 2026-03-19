@@ -1,0 +1,44 @@
+---=============================================================================
+--- 07. ARRAYS EXHAUSTIVE
+--- VALIDATES: Every single method + iteration
+---=============================================================================
+
+>! "Testing Arrays Exhaustive...";
+
+array:i: arr {10, 20, 30};
+
+arr.insert(1, 15); --- {10, 15, 20, 30}
+arr.update(0, 5); --- {5, 15, 20, 30}
+arr.delete(3);    --- {5, 15, 20}
+
+if (arr.size() == 3 AND arr.get(1) == 15) then;
+    >! "Array Insert/Update/Delete/Size/Get: OK";
+else;
+    halt.error >! "Array basic methods: FAILED";
+end;
+
+if (arr.contains(20) AND arr.find(15) == 1) then;
+    >! "Array Contains/Find: OK";
+else;
+    halt.error >! "Array search methods: FAILED";
+end;
+
+i: loop_sum = 0;
+for x in arr do;
+    loop_sum = loop_sum + x;
+end;
+
+if (loop_sum == 40) then;
+    >! "Array Iteration: OK";
+else;
+    halt.error >! "Array For-In: FAILED";
+end;
+
+arr.clear();
+if (arr.size() == 0) then;
+    >! "Array Clear: OK";
+else;
+    halt.error >! "Array Clear: FAILED";
+end;
+
+>! "07. ARRAYS EXHAUSTIVE: SUCCESS";

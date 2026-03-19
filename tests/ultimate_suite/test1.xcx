@@ -1,0 +1,12 @@
+fiber gen(i: max -> i) {
+    for i in 1 to max do;
+        yield i;
+    end;
+};
+
+fiber:i: f = gen(5);
+i: sum = 0;
+for val in f do;
+    sum = sum + val;
+end;
+>! sum;

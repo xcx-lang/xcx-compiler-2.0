@@ -1,0 +1,32 @@
+--- test_deep_delegation.xcx
+
+fiber deep_delegator(i: n -> i) {
+    if (n <= 0) then;
+        yield 0;
+        return 0;
+    end;
+    fiber:i: sub = deep_delegator(n - 1);
+    yield from sub;
+    yield n;
+    return 0;
+};
+
+i: D = 50; --- High depth to stress the stack and delegation tracking
+>! "[Hardening] Stress test: Fiber delegation depth " + D;
+fiber:i: f = deep_delegator(D);
+i: last_val = -1;
+i: total = 0;
+
+for v in f do;
+    total = total + 1;
+    last_val = v;
+end;
+
+>! "[Hardening] Yielded total: " + total;
+>! "[Hardening] Last value: " + last_val;
+
+if (total == (D + 1) AND last_val == D) then;
+    >! "[Hardening] PASS: Deep delegation stress test successful.";
+else;
+    halt.error >! "[Hardening] FAIL: Results inconsistent. Expected " + (D + 1) + " values, got " + total;
+end;

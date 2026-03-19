@@ -1,0 +1,20 @@
+---=============================================================================
+--- 03. STRING ADVANCED
+--- VALIDATES: HAS, escape sequences
+---=============================================================================
+
+>! "Testing String Advanced features...";
+
+s: email = "user@example.com";
+if (email HAS "@" AND !!(email HAS "xyz")) then;
+    >! "Operator HAS: OK";
+else;
+    halt.error >! "Operator HAS: FAILED";
+end;
+
+>! "Testing Escapes: [Line1\nLine2] [Tab\tText] [Quote\"] [Backslash\\]";
+
+s: escaped = "A\nB\tC\"D\\E";
+
+
+>! "03. STRING ADVANCED: SUCCESS";

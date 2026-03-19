@@ -1,0 +1,21 @@
+table: products {
+    columns = [id :: i @auto, name :: s, price :: f]
+    rows = [
+        ("Laptop", 2999.99),
+        ("Phone", 1499.50),
+        ("Tablet", 999.00),
+        ("Monitor", 1800.00)
+    ]
+};
+
+table: expensive = products.where(price > 1000.0);
+>! expensive.count();
+
+
+table: named = expensive.where(name HAS "o");
+>! named.count();
+
+
+for row in named do;
+    >! row.name + " - " + row.price;
+end;

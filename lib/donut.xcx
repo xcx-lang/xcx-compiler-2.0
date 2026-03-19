@@ -1,0 +1,192 @@
+--- =============================================================================
+---      _                       _                      
+---   __| | ___  _ __  _   _  __| |  __  __  ___  __  _
+---  / _` |/ _ \| '_ \| | | |/ _` |  \ \/ / / __| \ \/ /
+--- | (_| | (_) | | | | |_| | (_| |   >  <  | (__   >  < 
+---  \__,_|\___/|_| |_|\__,_|\__,_|  /_/\_\  \___| /_/\_\
+
+---  ASCII Spinning Donut — XCX 2.0
+---  inspired by Andy Sloane's donut.c
+---  requires: include "math.xcx" as math
+--- =============================================================================
+
+include "math.xcx" as math;
+
+--- ─────────────────────────────────────────────
+---  STAŁE DONUT
+--- ─────────────────────────────────────────────
+
+const i: SCREEN_W = 80;
+const i: SCREEN_H = 24;
+const i: TOTAL    = 1920;   --- 80 * 24
+
+const f: R1  = 1.0;         --- promien rurki torusa
+const f: R2  = 2.0;         --- promien srodka torusa
+const f: K2  = 5.0;         --- odleglosc od kamery
+const f: K1  = 40.0;        --- skala ekranu
+
+--- znaki jasnosci (od ciemnego do jasnego)
+const s: CHARS = ".,-~:;=!*#$@";
+
+--- ─────────────────────────────────────────────
+---  UTILS
+--- ─────────────────────────────────────────────
+
+func char_at(s: str, i: idx -> s) {
+    if (idx < 0) then; return "."; end;
+    if (idx >= str.length) then; return "@"; end;
+    return str.slice(idx, idx + 1);
+};
+
+func clamp_i(i: v, i: lo, i: hi -> i) {
+    if (v < lo) then; return lo; end;
+    if (v > hi) then; return hi; end;
+    return v;
+};
+
+--- ─────────────────────────────────────────────
+---  RENDEROWANIE KLATKI
+--- ─────────────────────────────────────────────
+
+func render_frame(f: A, f: B) {
+    --- bufory: output i z-buffer jako tablice
+    array:s: output {""};
+    output.delete(0);
+    array:f: zbuf {0.0};
+    zbuf.delete(0);
+
+    --- wypelnij bufory pustymi wartosciami
+    i: idx = 0;
+    while (idx < TOTAL) do;
+        output.insert(idx, " ");
+        zbuf.insert(idx, 0.0);
+        idx = idx + 1;
+    end;
+
+    --- prekalkuluj sin/cos katow obrotu
+    f: sinA = math.sin_f(A);
+    f: cosA = math.cos_f(A);
+    f: sinB = math.sin_f(B);
+    f: cosB = math.cos_f(B);
+
+    --- petla po torze torusa
+    f: TAU_L = 6.28318530717959;
+    f: theta = 0.0;
+    while (theta < TAU_L) do;
+
+        f: sinT = math.sin_f(theta);
+        f: cosT = math.cos_f(theta);
+
+        --- petla po przekroju kolowym rurki
+        f: phi = 0.0;
+        while (phi < TAU_L) do;
+
+            f: sinP = math.sin_f(phi);
+            f: cosP = math.cos_f(phi);
+
+            --- wspolrzedne punktu na torusie (przed obrotem)
+            f: cx = R2 + R1 * cosT;
+            f: cy = R1 * sinT;
+
+            --- obrot wokol osi X (o kat A) i osi Z (o kat B)
+            f: x = cx * (cosB * cosP + sinA * sinB * sinP) - cy * cosA * sinB;
+            f: y = cx * (sinB * cosP - sinA * cosB * sinP) + cy * cosA * cosB;
+            f: z = K2 + cosA * cx * sinP + cy * sinA;
+
+            --- perspektywa
+            f: ooz = 1.0 / z;  --- one over z
+
+            --- rzut na ekran
+            i: xp = i(f(SCREEN_W) / 2.0 + K1 * ooz * x);
+            i: yp = i(f(SCREEN_H) / 2.0 - K1 * ooz * y * 0.5);
+
+            --- sprawdz czy na ekranie
+            if (xp >= 0 AND xp < SCREEN_W AND yp >= 0 AND yp < SCREEN_H) then;
+                i: pos = yp * SCREEN_W + xp;
+
+                --- oswietlenie — iloczyn skalarny normalnej z kierunkiem swiatla
+                f: L = cosP * cosT * sinB
+                      - cosA * cosT * sinP
+                      - sinA * sinT
+                      + cosB * (cosA * sinT - cosT * sinP * sinA);
+
+                if (L > 0.0) then;
+                    if (ooz > zbuf.get(pos)) then;
+                        zbuf.update(pos, ooz);
+                        i: lum_idx = i(L * 8.0);
+                        lum_idx = clamp_i(lum_idx, 0, 11);
+                        output.update(pos, char_at(CHARS, lum_idx));
+                    end;
+                end;
+            end;
+
+            phi = phi + 0.07;
+        end;
+
+        theta = theta + 0.07;
+    end;
+
+    --- wypisz klatke — \r na poczatku cofa kursor do gory
+    --- najpierw cofnij kursor o SCREEN_H linii w gore
+    i: row = 0;
+    s: full_buffer = "";
+    while (row < SCREEN_H) do;
+        i: col = 0;
+        while (col < SCREEN_W) do;
+            full_buffer = full_buffer + output.get(row * SCREEN_W + col);
+            col = col + 1;
+        end;
+        full_buffer = full_buffer + "\n";
+        row = row + 1;
+    end;
+    >! full_buffer;
+};
+
+--- ─────────────────────────────────────────────
+---  GŁÓWNA PĘTLA ANIMACJI
+--- ─────────────────────────────────────────────
+
+>! "  Spinning Donut -- XCX 2.0";
+>! "  Wpisz ilosc klatek (np. 200), 0 = nieskonczona petla:";
+s: frames_input;
+>? frames_input;
+i: max_frames = i(frames_input);
+
+f: A = 0.0;   --- kat obrotu wokol osi X
+f: B = 0.0;   --- kat obrotu wokol osi Z
+f: TAU = 6.28318530717959;  --- lokalna kopia math.TAU
+
+b: infinite = (max_frames == 0);
+i: frame = 0;
+
+--- oddzielacz przed animacja
+>! "================================================================================";
+
+while (infinite OR frame < max_frames) do;
+    render_frame(A, B);
+
+    --- cofnij kursor o SCREEN_H linii przez \r i przesuwanie
+    --- XCX: \r wraca na poczatek linii, wiec wypisujemy SCREEN_H razy
+    i: back = 0;
+    while (back < SCREEN_H) do;
+        >! "\r\033[A";
+        back = back + 1;
+    end;
+
+    --- inkrementuj katy obrotu
+    A = A + 0.04;
+    B = B + 0.02;
+
+    --- zawijanie katow
+    if (A > TAU) then; A = A - TAU; end;
+    if (B > TAU) then; B = B - TAU; end;
+
+    @wait 33;   --- ~30 FPS
+
+    if (NOT infinite) then;
+        frame = frame + 1;
+    end;
+end;
+
+>! "";
+>! "  donut stop.";

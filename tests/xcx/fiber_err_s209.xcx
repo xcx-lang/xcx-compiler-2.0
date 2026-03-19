@@ -1,0 +1,8 @@
+--- S209: FiberTypeMismatch (yield expr inside void fiber)
+
+fiber void_fiber() {
+    yield "hello";
+};
+
+fiber: f = void_fiber();
+f.run();

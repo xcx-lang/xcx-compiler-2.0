@@ -1,0 +1,63 @@
+
+set:N: primes {2, 3, 5, 7, 11};
+if (primes.size() != 5) then;
+    halt.error >! "Set:N size failed";
+end;
+
+set:Q: fractions {0.5,,2.0 @step 0.5};
+if (fractions.size() != 4) then;
+    halt.error >! "Set:Q range/step failed";
+end;
+
+set:S: unique {"Alice", "Bob", "Alice"};
+if (unique.size() != 2) then;
+    halt.error >! "Set:S uniqueness failed";
+end;
+
+set:C: letters {"A",,"Z"};
+if (letters.size() != 26) then;
+    halt.error >! "Set:C range A..Z failed";
+end;
+
+primes.add(13);
+if (!primes.contains(13)) then;
+    halt.error >! "Set.add() failed";
+end;
+primes.remove(2);
+if (primes.contains(2)) then;
+    halt.error >! "Set.remove() failed";
+end;
+
+set:N: s1 {1, 2, 3, 4, 5};
+set:N: s2 {4, 5, 6, 7, 8};
+
+set:N: u = s1 UNION s2; 
+if (u.size() != 8) then;
+    halt.error >! "UNION failed";
+end;
+
+set:N: i = s1 INTERSECTION s2; 
+if (i.size() != 2) then;
+    halt.error >! "INTERSECTION failed";
+end;
+
+set:N: d = s1 DIFFERENCE s2; 
+if (d.size() != 3) then;
+    halt.error >! "DIFFERENCE failed";
+end;
+
+set:N: sd = s1 SYMMETRIC_DIFFERENCE s2; 
+if (sd.size() != 6) then;
+    halt.error >! "SYMMETRIC_DIFFERENCE failed";
+end;
+
+set:N: u_sym = s1 ∪ s2;
+if (u_sym != u) then;
+    halt.error >! "∪ operator failed";
+end;
+i: val = random.choice from s1;
+if (!s1.contains(val)) then;
+    halt.error >! "random.choice failed";
+end;
+
+>! "Sets test passed";

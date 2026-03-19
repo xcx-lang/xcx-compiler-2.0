@@ -1,0 +1,22 @@
+fiber range_fiber(i: n -> i) {
+    for x in 1 to n do;
+        yield x;
+    end;
+};
+
+--- Global test
+fiber:i: f = range_fiber(3);
+>! "Global test:";
+for val in f do;
+    >! val;
+end;
+
+--- Local test
+func run_test() {
+    >! "Local test:";
+    fiber:i: f2 = range_fiber(3);
+    for val in f2 do;
+        >! val;
+    end;
+};
+run_test();

@@ -1,0 +1,9 @@
+--- R306: FiberExhausted (.next() on finished fiber)
+
+fiber counter(-> i) {
+    yield 1;
+};
+
+fiber:i: f = counter();
+f.next(); --- returns 1, fiber finishes
+f.next(); --- R306 FiberExhausted runtime error expected

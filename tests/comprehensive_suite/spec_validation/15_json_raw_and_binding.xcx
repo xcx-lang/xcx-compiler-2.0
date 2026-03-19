@@ -1,0 +1,32 @@
+---=============================================================================
+--- 15. JSON RAW & BINDING
+--- VALIDATES: <<< >>>, bind, inject
+---=============================================================================
+
+>! "Testing JSON...";
+
+json: j_data <<<
+{
+    "meta": {
+        "ver": 1,
+        "author": "Antigravity"
+    },
+    "items": [1, 2, 3]
+}
+>>>;
+
+if (j_data.exists("meta.ver")) then;
+    >! "JSON Raw Block & Exists: OK";
+else;
+    halt.error >! "JSON Exists: FAILED";
+end;
+
+i: ver_val;
+j_data.bind("meta.ver", ver_val);
+if (ver_val == 1) then;
+    >! "JSON Bind: OK";
+else;
+    halt.error >! "JSON Bind: FAILED";
+end;
+
+>! "15. JSON RAW & BINDING: SUCCESS";

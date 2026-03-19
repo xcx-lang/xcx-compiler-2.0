@@ -1,0 +1,29 @@
+---=============================================================================
+--- 12. STORE & SECURITY
+--- VALIDATES: write/read/append/exists
+---=============================================================================
+
+>! "Testing Store Module...";
+
+s: f_name = "spec_store.txt";
+s: data = "Hello";
+
+store.write(f_name, data);
+if (store.exists(f_name)) then;
+    if (store.read(f_name) == "Hello") then;
+        >! "Store Write/Read/Exists: OK";
+    else;
+        halt.error >! "Store Read mismatch";
+    end;
+else;
+    halt.error >! "Store Exists: FAILED";
+end;
+
+store.append(f_name, " World");
+if (store.read(f_name) == "Hello World") then;
+    >! "Store Append: OK";
+else;
+    halt.error >! "Store Append mismatch: " + store.read(f_name);
+end;
+
+>! "12. STORE & SECURITY: SUCCESS";

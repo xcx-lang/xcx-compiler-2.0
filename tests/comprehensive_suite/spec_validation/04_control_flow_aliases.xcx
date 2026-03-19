@@ -1,0 +1,28 @@
+---=============================================================================
+--- 04. CONTROL FLOW ALIASES
+--- VALIDATES: elf, elif, elseif, els, then; end;
+---=============================================================================
+
+>! "Testing Control Flow Aliases...";
+
+i: score = 75;
+
+if (score > 90) then;
+    halt.error >! "Should not be A";
+elseif (score > 80) then; --- standard
+    halt.error >! "Should not be B";
+elif (score > 70) then;   --- alias 1
+    >! "Matched elif (OK)";
+else;
+    halt.error >! "Should have matched";
+end;
+
+if (score < 50) then;
+    halt.error >! "Unexpected match";
+elf (score > 70) then;    --- alias 2
+    >! "Matched elf (OK)";
+els;                      --- alias 3
+    halt.error >! "Should not be els";
+end;
+
+>! "04. CONTROL FLOW ALIASES: SUCCESS";

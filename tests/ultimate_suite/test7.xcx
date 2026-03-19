@@ -1,0 +1,12 @@
+json: doc <<< {"user": {"name": "", "scores": []}} >>>;
+doc.set("user.name", "Bob");
+doc.set("user.scores[0]", 95);
+doc.set("user.scores[1]", 87);
+
+s: name;
+doc.bind("user.name", name);
+>! name;
+
+json: scores;
+doc.bind("user.scores", scores);
+>! scores.count();

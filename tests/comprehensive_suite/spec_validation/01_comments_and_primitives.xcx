@@ -1,0 +1,36 @@
+---=============================================================================
+--- 01. COMMENTS & PRIMITIVES
+--- VALIDATES: Single/Multi-line comments, types (i, f, s, b), defaults, const
+---=============================================================================
+
+--- This is a single line comment
+
+---
+This is a multi-line
+comment block.
+*---
+
+>! "Testing Primitives & Defaults...";
+
+i: def_i;
+f: def_f;
+s: def_s;
+b: def_b;
+
+if (def_i == 0 AND def_f == 0.0 AND def_s == "" AND def_b == false) then;
+    >! "Default initialization: OK";
+else;
+    halt.error >! "Default initialization: FAILED";
+end;
+
+const i: LOCK_VAL = 42;
+i: mutable_val = LOCK_VAL;
+mutable_val = mutable_val + 8;
+
+if (mutable_val == 50 AND LOCK_VAL == 42) then;
+    >! "Constants and reassignment: OK";
+else;
+    halt.error >! "Constants and reassignment: FAILED";
+end;
+
+>! "01. COMMENTS & PRIMITIVES: SUCCESS";

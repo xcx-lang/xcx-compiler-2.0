@@ -1,0 +1,33 @@
+array:i: nums {10, 20, 30, 40, 50};
+i: first = nums.get(0);
+i: last = nums.get(4);
+>! "First: " + first;
+>! "Last: " + last;
+>! "Size: " + nums.size();
+
+b: has20 = nums.contains(20);
+b: has99 = nums.contains(99);
+>! "Contains 20: " + has20;
+>! "Contains 99: " + has99;
+set:N: primes {2, 3, 5, 7, 11};
+b: has5 = primes.contains(5);
+b: has4 = primes.contains(4);
+>! "Set has 5: " + has5;
+>! "Set has 4: " + has4;
+>! "Set size: " + primes.size();
+
+map: scores {
+    schema = [s <-> i]
+    data = [
+        "alice" :: 95,
+        "bob" :: 80,
+        "carol" :: 73
+    ]
+};
+i: alice_score = scores.get("alice");
+>! "Alice score: " + alice_score;
+
+b: has_bob = scores.contains("bob");
+b: has_dan = scores.contains("dan");
+>! "Has bob: " + has_bob;
+>! "Has dan: " + has_dan;

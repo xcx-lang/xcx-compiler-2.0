@@ -1,0 +1,17 @@
+--- Test for passing fibers to functions
+
+fiber counter(i: max -> i) {
+    for i in 1 to max do;
+        yield i;
+    end;
+};
+
+func process_fiber(fiber:i: f) {
+    while (f.isDone() == false) do;
+        i: val = f.next();
+        >! "Processed: " + val;
+    end;
+};
+
+fiber:i: my_f = counter(3);
+process_fiber(my_f);

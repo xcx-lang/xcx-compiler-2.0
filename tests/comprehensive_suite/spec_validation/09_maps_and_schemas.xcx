@@ -1,0 +1,36 @@
+---=============================================================================
+--- 09. MAPS & SCHEMAS
+--- VALIDATES: Schema <->, Data ::, keys(), const maps
+---=============================================================================
+
+>! "Testing Maps & Schemas...";
+
+map: dict {
+    schema = [s <-> i]
+    data = [
+        "key1" :: 100,
+        "key2" :: 200
+    ]
+};
+
+if (dict.size() == 2 AND dict.get("key1") == 100) then;
+    >! "Map Construction & Get: OK";
+else;
+    halt.error >! "Map basics: FAILED";
+end;
+
+dict.insert("key3", 300);
+if (dict.contains("key3") AND dict.get("key3") == 300) then;
+    >! "Map Insert: OK";
+else;
+    halt.error >! "Map Insert: FAILED";
+end;
+
+array:s: k_list = dict.keys();
+if (k_list.size() == 3) then;
+    >! "Map Keys(): OK";
+else;
+    halt.error >! "Map Keys(): FAILED";
+end;
+
+>! "09. MAPS & SCHEMAS: SUCCESS";

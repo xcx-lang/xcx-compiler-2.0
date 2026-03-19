@@ -1,0 +1,12 @@
+---=============================================================================
+--- 11. MODULES & NAMESPACES
+--- VALIDATES: include, include as
+---=============================================================================
+
+include "lib_spec.xcx";
+include "lib_spec.xcx" as spec_lib;
+
+lib_test();
+spec_lib.lib_test();
+
+>! "11. MODULES & NAMESPACES: SUCCESS";

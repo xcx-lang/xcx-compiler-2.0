@@ -1,0 +1,44 @@
+---=============================================================================
+--- 13. DATE TIME FULL
+--- VALIDATES: Format tokens, arithmetic, comparisons
+---=============================================================================
+
+>! "Testing Date System...";
+
+date: d_iso = date("2024-01-01");
+date: d_euro = date("01/01/2024", "DD/MM/YYYY");
+
+if (d_iso == d_euro) then;
+    >! "Date Creation (ISO & Custom): OK";
+else;
+    halt.error >! "Date mismatch";
+end;
+
+if (d_iso.year == 2024 AND d_iso.month == 1 AND d_iso.day == 1) then;
+    >! "Date Properties: OK";
+else;
+    halt.error >! "Date Properties: FAILED";
+end;
+
+date: d_next = d_iso + 10;
+if (d_next.day == 11) then;
+    >! "Date Arithmetic (+): OK";
+else;
+    halt.error >! "Date Arithmetic: FAILED";
+end;
+
+i: diff = d_next - d_iso;
+if (diff == 10) then;
+    >! "Date Difference (-): OK";
+else;
+    halt.error >! "Date Difference: FAILED";
+end;
+
+>! "Testing format tokens...";
+if (d_iso.format("DD-MM-YYYY") == "01-01-2024") then;
+    >! "Date Format tokens: OK";
+else;
+    halt.error >! "Date Format tokens: FAILED (" + d_iso.format("DD-MM-YYYY") + ")";
+end;
+
+>! "13. DATE TIME FULL: SUCCESS";

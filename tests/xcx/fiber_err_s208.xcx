@@ -1,0 +1,7 @@
+--- S208: YieldOutsideFiber
+
+func normal_function() {
+    yield 5;
+};
+
+normal_function();

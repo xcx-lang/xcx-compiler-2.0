@@ -1,0 +1,3 @@
+func lib_test() { 
+    >! "Lib OK"; 
+};
