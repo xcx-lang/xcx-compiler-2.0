@@ -50,7 +50,7 @@ serve: api {
 
 ## Installation
 
-Download the latest installer from the [Releases](https://github.com/xcx-lang/xcx-compiler-2.0/releases) page and run:
+Download the latest installer from the [Releases](https://github.com/xcx-lang/xcx-compiler/releases) page and run:
 
 ```
 xcx-setup.exe
@@ -85,8 +85,8 @@ xcx --version
 Requires **Rust 1.75+**.
 
 ```bash
-git clone https://github.com/xcx-lang/xcx-compiler-2.0
-cd xcx-compiler-2.0
+git clone https://github.com/xcx-lang/xcx-compiler
+cd xcx-compiler
 cargo build --release
 ```
 
