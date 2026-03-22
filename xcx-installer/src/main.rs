@@ -13,6 +13,8 @@ const MATH_XCX: &[u8] = include_bytes!("../../lib/math.xcx");
 const XCX_ICON: &[u8] = include_bytes!("../../XCX_Ecosystem_v1.0.0/icons/xcx.ico");
 const PAX_ICON: &[u8] = include_bytes!("../../XCX_Ecosystem_v1.0.0/icons/pax.ico");
 const UNINSTALLER_EXE: &[u8] = include_bytes!("../target/release/xcx-uninstall.exe");
+const LICENSE_TXT: &[u8] = include_bytes!("../../XCX_Ecosystem_v1.0.0/LICENSE.txt");
+const README_TXT: &[u8] = include_bytes!("../../XCX_Ecosystem_v1.0.0/README.txt");
 
 // ── Kolory ────────────────────────────────────────────────────────────────────
 const C_BG:        egui::Color32 = egui::Color32::from_rgb(15,  15,  15);
@@ -150,6 +152,9 @@ fn run_install(
         if let Err(e) = fs::write(install_dir.join("lib").join("math.xcx"), MATH_XCX) {
             bail!(format!("Failed to write math.xcx: {}", e));
         }
+        step!(0.62, "Writing license and readme...");
+        let _ = fs::write(install_dir.join("LICENSE.txt"), LICENSE_TXT);
+        let _ = fs::write(install_dir.join("README.txt"), README_TXT);
     }
 
     step!(0.68, "Configuring system PATH...");

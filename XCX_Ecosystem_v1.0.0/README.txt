@@ -20,7 +20,7 @@ Welcome to XCX, a high-performance, professional-grade programming language and 
 ## Online Resources
 
 - Documentation: `xcx-documentation.md` (included in the full source)
-- Website: https://xcx-lang.dev (Example)
+- Website: https://xcx-lang.github.io/xcx-site/docs 
 
 Happy Coding!
 - XCX Team
