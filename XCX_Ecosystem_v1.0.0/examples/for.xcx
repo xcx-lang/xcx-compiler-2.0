@@ -1,3 +1,0 @@
-for i in 1 to 20 do;
-    >! "Welcome to XCX!" + " " + i;
-end;
