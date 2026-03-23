@@ -149,7 +149,3 @@ Full documentation is available at **[xcx-lang.github.io](https://xcx-lang.githu
 | Error handling | `errors_halt.md` |
 
 ---
-
-## License
-
-See [`XCX_Ecosystem_v1.0.0/LICENSE.txt`](XCX_Ecosystem_v1.0.0/LICENSE.txt).
