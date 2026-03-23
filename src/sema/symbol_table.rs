@@ -3,14 +3,24 @@ use std::collections::{HashMap, HashSet};
 use crate::parser::ast::Type;
 
 #[derive(Clone)]
-pub struct SymbolTable {
+pub struct SymbolTable<'a> {
+    parent: Option<&'a SymbolTable<'a>>,
     scopes: Vec<HashMap<String, Type>>,
     consts: Vec<HashSet<String>>,
 }
 
-impl SymbolTable {
+impl<'a> SymbolTable<'a> {
     pub fn new() -> Self {
         Self {
+            parent: None,
+            scopes: vec![HashMap::new()],
+            consts: vec![HashSet::new()],
+        }
+    }
+
+    pub fn new_with_parent(parent: &'a SymbolTable<'a>) -> Self {
+        Self {
+            parent: Some(parent),
             scopes: vec![HashMap::new()],
             consts: vec![HashSet::new()],
         }
@@ -33,6 +43,9 @@ impl SymbolTable {
             if scope.contains_key(name) {
                 return true;
             }
+        }
+        if let Some(p) = self.parent {
+            return p.has(name);
         }
         false
     }
@@ -58,6 +71,9 @@ impl SymbolTable {
                 return Some(ty.clone());
             }
         }
+        if let Some(p) = self.parent {
+            return p.lookup(name);
+        }
         None
     }
     
@@ -67,13 +83,21 @@ impl SymbolTable {
                 return self.consts[i].contains(name);
             }
         }
+        if let Some(p) = self.parent {
+            return p.is_const(name);
+        }
         false
     }
 
     pub fn _copy_globals(&self) -> Self {
+        let mut curr = self;
+        while let Some(p) = curr.parent {
+            curr = p;
+        }
         Self {
-            scopes: vec![self.scopes[0].clone()],
-            consts: vec![self.consts[0].clone()],
+            parent: None,
+            scopes: vec![curr.scopes[0].clone()],
+            consts: vec![curr.consts[0].clone()],
         }
     }
 }

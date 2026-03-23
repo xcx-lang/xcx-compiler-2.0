@@ -5,7 +5,8 @@ use xcx_compiler::parser::expander::Expander;
 use xcx_compiler::sema::checker::Checker;
 use xcx_compiler::sema::symbol_table::SymbolTable;
 use xcx_compiler::backend::Compiler as XCXCompiler;
-use xcx_compiler::backend::vm::{VM, VMContext};
+use xcx_compiler::backend::vm::{VM, SharedContext, Value, FunctionChunk};
+use std::sync::Arc;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -33,11 +34,11 @@ fn ultimate_dir() -> PathBuf {
 
 /// Run a source string through the full pipeline. Panics if type-check or
 /// runtime panics.  Returns the VM after execution.
-fn run_source(source: &str) -> VM {
+fn run_source(source: &str) -> Arc<VM> {
     run_source_with_dir(source, None)
 }
 
-fn run_source_with_dir(source: &str, dir: Option<PathBuf>) -> VM {
+fn run_source_with_dir(source: &str, dir: Option<PathBuf>) -> Arc<VM> {
     // Inject assert function for testing convenience
     let source_with_assert = format!(
         "func assert(b: condition) {{ if (!condition) then; halt.error >! \"Assertion failed\"; end; }};\n{}",
@@ -63,44 +64,44 @@ fn run_source_with_dir(source: &str, dir: Option<PathBuf>) -> VM {
     );
 
     let mut compiler = XCXCompiler::new();
-    let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+    let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
 
-    let mut vm = VM::new();
-    let ctx = VMContext { constants: &constants, functions: &functions };
-    vm.run(&bytecode, &ctx);
+    let vm = Arc::new(VM::new());
+    let ctx = SharedContext { constants, functions };
+    vm.clone().run(main_chunk, ctx);
     vm
 }
 
 /// Load a .xcx file from tests/xcx/ and run it through the full pipeline.
-fn run_file(filename: &str) -> VM {
+fn run_file(filename: &str) -> Arc<VM> {
     let path = test_dir().join(filename);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Cannot read {}: {}", path.display(), e));
     run_source(&source)
 }
 
-fn run_comprehensive_file(filename: &str) -> VM {
+fn run_comprehensive_file(filename: &str) -> Arc<VM> {
     let path = comprehensive_dir().join(filename);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Cannot read {}: {}", path.display(), e));
     run_source_with_dir(&source, Some(comprehensive_dir()))
 }
 
-fn run_professional_file(filename: &str) -> VM {
+fn run_professional_file(filename: &str) -> Arc<VM> {
     let path = professional_dir().join(filename);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Cannot read {}: {}", path.display(), e));
     run_source_with_dir(&source, Some(professional_dir()))
 }
 
-fn run_hardening_file(filename: &str) -> VM {
+fn run_hardening_file(filename: &str) -> Arc<VM> {
     let path = hardening_dir().join(filename);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Cannot read {}: {}", path.display(), e));
     run_source_with_dir(&source, Some(hardening_dir()))
 }
 
-fn run_ultimate_file(filename: &str) -> VM {
+fn run_ultimate_file(filename: &str) -> Arc<VM> {
     let path = ultimate_dir().join(filename);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Cannot read {}: {}", path.display(), e));
@@ -281,12 +282,12 @@ fn map_update_overwrites_existing_key() {
     let _ = checker.check(&mut program, &mut symbols);
 
     let mut compiler = XCXCompiler::new();
-    let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+    let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
     let global_idx = *compiler.globals.get(&result_id).unwrap();
 
-    let mut vm = VM::new();
-    let ctx = VMContext { constants: &constants, functions: &functions };
-    vm.run(&bytecode, &ctx);
+    let vm = Arc::new(VM::new());
+    let ctx = SharedContext { constants, functions };
+    vm.clone().run(main_chunk, ctx);
 
     match vm.get_global(global_idx) {
         Some(Value::Int(v)) => assert_eq!(v, 35, "Expected 35 after update, got {}", v),
@@ -354,12 +355,12 @@ fn run_fib(n: u32) -> i64 {
     let _ = checker.check(&mut program, &mut symbols);
 
     let mut compiler = XCXCompiler::new();
-    let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+    let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
     let idx = *compiler.globals.get(&result_id).unwrap();
 
-    let mut vm = VM::new();
-    let ctx = VMContext { constants: &constants, functions: &functions };
-    vm.run(&bytecode, &ctx);
+    let vm = Arc::new(VM::new());
+    let ctx = SharedContext { constants, functions };
+    vm.clone().run(main_chunk, ctx);
 
     match vm.get_global(idx) {
         Some(Value::Int(v)) => v,

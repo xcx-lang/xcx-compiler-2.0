@@ -1,18 +1,20 @@
 use crate::lexer::token::{Token, TokenKind};
 use crate::sema::interner::Interner;
 
-pub struct Scanner {
-    chars: Vec<char>,
+pub struct Scanner<'a> {
+    source: &'a [u8],
     pos: usize,
+    char_pos: usize,
     line: usize,
     col: usize,
 }
 
-impl Scanner {
-    pub fn new(source: &str) -> Self {
+impl<'a> Scanner<'a> {
+    pub fn new(source: &'a str) -> Self {
         Self {
-            chars: source.chars().collect(),
+            source: source.as_bytes(),
             pos: 0,
+            char_pos: 0,
             line: 1,
             col: 1,
         }
@@ -34,90 +36,105 @@ impl Scanner {
             return self.number(c, line, col);
         }
 
-        if c.is_alphabetic() || c == '_' {
-            return self.identifier(c, line, col, interner);
+        if c.is_ascii_alphabetic() || c == b'_' {
+            return self.identifier(line, col, interner);
+        }
+
+        if c >= 128 {
+            let remain = &self.source[self.pos - 1..];
+            if remain.starts_with("∪".as_bytes()) {
+                self.advance(); self.advance();
+                return Token::new(TokenKind::Union, line, col, 1);
+            } else if remain.starts_with("∩".as_bytes()) {
+                self.advance(); self.advance();
+                return Token::new(TokenKind::Intersection, line, col, 1);
+            } else if remain.starts_with("⊕".as_bytes()) {
+                self.advance(); self.advance();
+                return Token::new(TokenKind::SymDifference, line, col, 1);
+            }
+            return self.identifier(line, col, interner);
         }
 
         match c {
-            '(' => Token::new(TokenKind::LeftParen, line, col, 1),
-            ')' => Token::new(TokenKind::RightParen, line, col, 1),
-            '{' => Token::new(TokenKind::LeftBrace, line, col, 1),
-            '}' => Token::new(TokenKind::RightBrace, line, col, 1),
-            '[' => Token::new(TokenKind::LeftBracket, line, col, 1),
-            ']' => Token::new(TokenKind::RightBracket, line, col, 1),
-            ',' => {
-                if self.peek() == ',' {
+            b'(' => Token::new(TokenKind::LeftParen, line, col, 1),
+            b')' => Token::new(TokenKind::RightParen, line, col, 1),
+            b'{' => Token::new(TokenKind::LeftBrace, line, col, 1),
+            b'}' => Token::new(TokenKind::RightBrace, line, col, 1),
+            b'[' => Token::new(TokenKind::LeftBracket, line, col, 1),
+            b']' => Token::new(TokenKind::RightBracket, line, col, 1),
+            b',' => {
+                if self.peek() == b',' {
                     self.advance();
                     Token::new(TokenKind::DoubleComma, line, col, 2)
                 } else {
                     Token::new(TokenKind::Comma, line, col, 1)
                 }
             }
-            '.' => {
-                if self.peek() == '.' {
+            b'.' => {
+                if self.peek() == b'.' {
                     self.advance();
                     Token::new(TokenKind::To, line, col, 2)
                 } else {
                     Token::new(TokenKind::Dot, line, col, 1)
                 }
             }
-            ';' => Token::new(TokenKind::Semicolon, line, col, 1),
-            ':' => {
-                if self.peek() == ':' {
+            b';' => Token::new(TokenKind::Semicolon, line, col, 1),
+            b':' => {
+                if self.peek() == b':' {
                     self.advance();
                     Token::new(TokenKind::DoubleColon, line, col, 2)
                 } else {
                     Token::new(TokenKind::Colon, line, col, 1)
                 }
             }
-            '+' => {
-                if self.peek() == '+' {
+            b'+' => {
+                if self.peek() == b'+' {
                     self.advance();
                     Token::new(TokenKind::PlusPlus, line, col, 2)
                 } else {
                     Token::new(TokenKind::Plus, line, col, 1)
                 }
             }
-            '-' => {
-                if self.peek() == '>' {
+            b'-' => {
+                if self.peek() == b'>' {
                     self.advance();
                     Token::new(TokenKind::Arrow, line, col, 2)
                 } else {
                     Token::new(TokenKind::Minus, line, col, 1)
                 }
             }
-            '*' => Token::new(TokenKind::Star, line, col, 1),
-            '/' => Token::new(TokenKind::Slash, line, col, 1),
-            '%' => Token::new(TokenKind::Percent, line, col, 1),
-            '^' => Token::new(TokenKind::Caret, line, col, 1),
-            '!' => {
-                if self.peek() == '=' {
+            b'*' => Token::new(TokenKind::Star, line, col, 1),
+            b'/' => Token::new(TokenKind::Slash, line, col, 1),
+            b'%' => Token::new(TokenKind::Percent, line, col, 1),
+            b'^' => Token::new(TokenKind::Caret, line, col, 1),
+            b'!' => {
+                if self.peek() == b'=' {
                     self.advance();
                     Token::new(TokenKind::BangEqual, line, col, 2)
-                } else if self.peek() == '!' {
+                } else if self.peek() == b'!' {
                     self.advance();
                     Token::new(TokenKind::Not, line, col, 2)
                 } else {
                     Token::new(TokenKind::Bang, line, col, 1)
                 }
             }
-            '=' => {
-                if self.peek() == '=' {
+            b'=' => {
+                if self.peek() == b'=' {
                     self.advance();
                     Token::new(TokenKind::EqualEqual, line, col, 2)
                 } else {
                     Token::new(TokenKind::Equal, line, col, 1)
                 }
             }
-            '<' => {
-                if self.peek() == '=' {
+            b'<' => {
+                if self.peek() == b'=' {
                     self.advance();
                     Token::new(TokenKind::LessEqual, line, col, 2)
-                } else if self.peek() == '-' && self.peek_next() == '>' {
+                } else if self.peek() == b'-' && self.peek_next() == b'>' {
                     self.advance();
                     self.advance();
                     Token::new(TokenKind::Bridge, line, col, 3)
-                } else if self.peek() == '<' && self.peek_next() == '<' {
+                } else if self.peek() == b'<' && self.peek_next() == b'<' {
                     self.advance();
                     self.advance();
                     return self.raw_block(line, col, interner);
@@ -125,74 +142,74 @@ impl Scanner {
                     Token::new(TokenKind::Less, line, col, 1)
                 }
             }
-            '>' => {
-                if self.peek() == '=' {
+            b'>' => {
+                if self.peek() == b'=' {
                     self.advance();
                     Token::new(TokenKind::GreaterEqual, line, col, 2)
-                } else if self.peek() == '!' {
+                } else if self.peek() == b'!' {
                     self.advance();
                     Token::new(TokenKind::GreaterBang, line, col, 2)
-                } else if self.peek() == '?' {
+                } else if self.peek() == b'?' {
                     self.advance();
                     Token::new(TokenKind::GreaterQuestion, line, col, 2)
                 } else {
                     Token::new(TokenKind::Greater, line, col, 1)
                 }
             }
-            '@' => {
+            b'@' => {
                 let start_col = col;
-                let mut name = String::new();
-                while self.peek().is_alphabetic() {
-                    name.push(self.advance());
+                let mut name_bytes = Vec::new();
+                while self.peek().is_ascii_alphabetic() {
+                    name_bytes.push(self.advance());
                 }
-                match name.as_str() {
+                let name = std::str::from_utf8(&name_bytes).unwrap_or("");
+                match name {
                     "step" => Token::new(TokenKind::AtStep, line, start_col, name.len() + 1),
                     "auto" => Token::new(TokenKind::AtAuto, line, start_col, name.len() + 1),
                     "wait" => Token::new(TokenKind::AtWait, line, start_col, name.len() + 1),
                     _ => Token::new(TokenKind::Unknown('@'), line, start_col, 1),
                 }
             }
-            '&' => {
-                if self.peek() == '&' {
+            b'&' => {
+                if self.peek() == b'&' {
                     self.advance();
                     Token::new(TokenKind::And, line, col, 2)
                 } else {
                     Token::new(TokenKind::Unknown('&'), line, col, 1)
                 }
             }
-            '|' => {
-                if self.peek() == '|' {
+            b'|' => {
+                if self.peek() == b'|' {
                     self.advance();
                     Token::new(TokenKind::Or, line, col, 2)
                 } else {
                     Token::new(TokenKind::Unknown('|'), line, col, 1)
                 }
             }
-            '\"' => {
+            b'\"' => {
                 self.string(line, col, interner)
             }
-            '∪' => Token::new(TokenKind::Union, line, col, 1),
-            '∩' => Token::new(TokenKind::Intersection, line, col, 1),
-            '\\' => Token::new(TokenKind::Difference, line, col, 1),
-            '⊕' => Token::new(TokenKind::SymDifference, line, col, 1),
-            _ => Token::new(TokenKind::Unknown(c), line, col, 1),
+            b'\\' => Token::new(TokenKind::Difference, line, col, 1),
+            _ => {
+                let arr = [c];
+                let text = std::str::from_utf8(&arr).unwrap_or("?");
+                Token::new(TokenKind::Unknown(text.chars().next().unwrap_or('?')), line, col, 1)
+            }
         }
     }
 
     fn skip_whitespace_and_comments(&mut self) {
         loop {
             let c = self.peek();
-            if c.is_whitespace() {
+            if c.is_ascii_whitespace() {
                 self.advance();
-            } else if c == '-' && self.peek_next() == '-' && self.peek_at(2) == '-' {
-                self.advance(); // -
-                self.advance(); // -
-                self.advance(); // -
+            } else if self.source[self.pos..].starts_with(b"---") {
+                self.advance(); self.advance(); self.advance();
                 
                 let mut is_multi = true;
                 let mut temp_pos = self.pos;
-                while temp_pos < self.chars.len() && self.chars[temp_pos] != '\n' {
-                    if !self.chars[temp_pos].is_whitespace() {
+                while temp_pos < self.source.len() && self.source[temp_pos] != b'\n' {
+                    if !self.source[temp_pos].is_ascii_whitespace() {
                         is_multi = false;
                         break;
                     }
@@ -200,16 +217,13 @@ impl Scanner {
                 }
                 
                 if !is_multi {
-                    while self.peek() != '\n' && self.peek() != '\0' {
+                    while self.peek() != b'\n' && self.peek() != b'\0' {
                         self.advance();
                     }
                 } else {
-                    while self.peek() != '\0' {
-                        if self.peek() == '*' && self.peek_at(1) == '-' && self.peek_at(2) == '-' && self.peek_at(3) == '-' {
-                            self.advance(); // *
-                            self.advance(); // -
-                            self.advance(); // -
-                            self.advance(); // -
+                    while self.peek() != b'\0' {
+                        if self.source[self.pos..].starts_with(b"*---") {
+                            self.advance(); self.advance(); self.advance(); self.advance();
                             break;
                         }
                         self.advance();
@@ -221,47 +235,52 @@ impl Scanner {
         }
     }
 
-    fn peek(&self) -> char {
+    fn peek(&self) -> u8 {
         self.peek_at(0)
     }
 
-    fn peek_next(&self) -> char {
+    fn peek_next(&self) -> u8 {
         self.peek_at(1)
     }
 
-    fn peek_at(&self, offset: usize) -> char {
-        if self.pos + offset >= self.chars.len() {
-            '\0'
+    fn peek_at(&self, offset: usize) -> u8 {
+        if self.pos + offset >= self.source.len() {
+            b'\0'
         } else {
-            self.chars[self.pos + offset]
+            self.source[self.pos + offset]
         }
     }
 
-    fn advance(&mut self) -> char {
-        let c = self.chars[self.pos];
+    fn advance(&mut self) -> u8 {
+        let c = self.source[self.pos];
         self.pos += 1;
-        if c == '\n' {
-            self.line += 1;
-            self.col = 1;
-        } else {
-            self.col += 1;
+        if c < 128 || (c & 0b1100_0000) != 0b1000_0000 {
+            self.char_pos += 1;
+            if c == b'\n' {
+                self.line += 1;
+                self.col = 1;
+            } else {
+                self.col += 1;
+            }
         }
         c
     }
 
     fn is_at_end(&self) -> bool {
-        self.pos >= self.chars.len()
+        self.pos >= self.source.len()
     }
 
-    fn identifier(&mut self, _first: char, line: usize, col: usize, interner: &mut Interner) -> Token {
-        let start_pos = self.pos - 1;
-        while self.peek().is_alphanumeric() || self.peek() == '_' {
+    fn identifier(&mut self, line: usize, col: usize, interner: &mut Interner) -> Token {
+        let start_byte_pos = self.pos - 1;
+        let start_char_pos = self.char_pos - 1;
+        while self.peek().is_ascii_alphanumeric() || self.peek() == b'_' || self.peek() >= 128 {
             self.advance();
         }
-        let text: String = self.chars[start_pos..self.pos].iter().collect();
+        let text_bytes = &self.source[start_byte_pos..self.pos];
+        let text = std::str::from_utf8(text_bytes).unwrap_or("");
         let lower_text = text.to_lowercase();
 
-        let kind = match text.as_str() {
+        let kind = match text {
             "UNION" => TokenKind::Union,
             "INTERSECTION" => TokenKind::Intersection,
             "DIFFERENCE" => TokenKind::Difference,
@@ -290,17 +309,19 @@ impl Scanner {
                 "else" | "els" => {
                     self.skip_whitespace_and_comments();
                     let after_ws_pos = self.pos;
+                    let after_ws_char_pos = self.char_pos;
                     let after_ws_line = self.line;
                     let after_ws_col = self.col;
                     let next_start = self.pos;
-                    while self.peek().is_alphanumeric() || self.peek() == '_' {
+                    while self.peek().is_ascii_alphanumeric() || self.peek() == b'_' {
                         self.advance();
                     }
-                    let next_text: String = self.chars[next_start..self.pos].iter().collect();
+                    let next_text = std::str::from_utf8(&self.source[next_start..self.pos]).unwrap_or("");
                     if next_text == "if" {
                         TokenKind::ElseIf
                     } else {
                         self.pos = after_ws_pos;
+                        self.char_pos = after_ws_char_pos;
                         self.line = after_ws_line;
                         self.col = after_ws_col;
                         TokenKind::Else
@@ -346,100 +367,104 @@ impl Scanner {
                 "random" => TokenKind::Random,
                 "choice" => TokenKind::Choice,
                 "from" => TokenKind::From,
-                _ => TokenKind::Identifier(interner.intern(&text)),
+                _ => TokenKind::Identifier(interner.intern(text)),
             }
         };
-        Token::new(kind, line, col, text.len())
+        Token::new(kind, line, col, self.char_pos - start_char_pos)
     }
 
-    fn number(&mut self, first: char, line: usize, col: usize) -> Token {
-        let mut num = String::from(first);
+    fn number(&mut self, _first: u8, line: usize, col: usize) -> Token {
+        let start_byte_pos = self.pos - 1;
+        let start_char_pos = self.char_pos - 1;
         let mut is_float = false;
         while self.peek().is_ascii_digit() {
-            num.push(self.advance());
+            self.advance();
         }
-        if self.peek() == '.' && self.peek_next().is_ascii_digit() {
+        if self.peek() == b'.' && self.peek_next().is_ascii_digit() {
             is_float = true;
-            num.push(self.advance());
+            self.advance();
             while self.peek().is_ascii_digit() {
-                num.push(self.advance());
+                self.advance();
             }
         }
+        let num_str = std::str::from_utf8(&self.source[start_byte_pos..self.pos]).unwrap_or("0");
         if is_float {
-            Token::new(TokenKind::FloatLiteral(num.parse().unwrap_or(0.0)), line, col, num.len())
+            Token::new(TokenKind::FloatLiteral(num_str.parse().unwrap_or(0.0)), line, col, self.char_pos - start_char_pos)
         } else {
-            Token::new(TokenKind::IntLiteral(num.parse().unwrap_or(0)), line, col, num.len())
+            Token::new(TokenKind::IntLiteral(num_str.parse().unwrap_or(0)), line, col, self.char_pos - start_char_pos)
         }
     }
 
     fn string(&mut self, line: usize, col: usize, interner: &mut Interner) -> Token {
-        let start_pos_full = self.pos - 1;
-        let mut s = String::new();
-        while self.peek() != '"' && self.peek() != '\0' {
+        let start_char_pos = self.char_pos - 1;
+        let mut bytes = Vec::new();
+        while self.peek() != b'"' && self.peek() != b'\0' {
             let c = self.advance();
-            if c == '\\' {
+            if c == b'\\' {
                 match self.peek() {
-                    'n' => { self.advance(); s.push('\n'); }
-                    't' => { self.advance(); s.push('\t'); }
-                    'r' => { self.advance(); s.push('\r'); }
-                    '0'..='7' => {
+                    b'n' => { self.advance(); bytes.push(b'\n'); }
+                    b't' => { self.advance(); bytes.push(b'\t'); }
+                    b'r' => { self.advance(); bytes.push(b'\r'); }
+                    b'0'..=b'7' => {
                         let mut octal = String::new();
                         for _ in 0..3 {
-                            if self.peek().is_ascii_digit() && self.peek() <= '7' {
-                                octal.push(self.advance());
+                            if self.peek().is_ascii_digit() && self.peek() <= b'7' {
+                                octal.push(self.advance() as char);
                             } else {
                                 break;
                             }
                         }
                         if let Ok(val) = u32::from_str_radix(&octal, 8) {
                             if let Some(ch) = std::char::from_u32(val) {
-                                s.push(ch);
+                                let mut b = [0; 4];
+                                bytes.extend_from_slice(ch.encode_utf8(&mut b).as_bytes());
                             }
                         }
                     }
-                    'x' => {
+                    b'x' => {
                         self.advance();
                         let mut hex = String::new();
                         for _ in 0..2 {
                             if self.peek().is_ascii_hexdigit() {
-                                hex.push(self.advance());
+                                hex.push(self.advance() as char);
                             } else {
                                 break;
                             }
                         }
                         if let Ok(val) = u32::from_str_radix(&hex, 16) {
                             if let Some(ch) = std::char::from_u32(val) {
-                                s.push(ch);
+                                let mut b = [0; 4];
+                                bytes.extend_from_slice(ch.encode_utf8(&mut b).as_bytes());
                             }
                         }
                     }
-                    '"' => { self.advance(); s.push('"'); }
-                    '\\' => { self.advance(); s.push('\\'); }
-                    _ => { s.push('\\'); }
+                    b'"' => { self.advance(); bytes.push(b'"'); }
+                    b'\\' => { self.advance(); bytes.push(b'\\'); }
+                    _ => { bytes.push(b'\\'); }
                 }
             } else {
-                s.push(c);
+                bytes.push(c);
             }
         }
-        if self.peek() == '"' {
+        if self.peek() == b'"' {
             self.advance();
-            Token::new(TokenKind::StringLiteral(interner.intern(&s)), line, col, self.pos - start_pos_full)
+            let parsed_str = String::from_utf8(bytes).unwrap_or_default();
+            Token::new(TokenKind::StringLiteral(interner.intern(&parsed_str)), line, col, self.char_pos - start_char_pos)
         } else {
             Token::new(TokenKind::Unknown('"'), line, col, 1)
         }
     }
 
     fn raw_block(&mut self, line: usize, col: usize, interner: &mut Interner) -> Token {
-        let start_pos_full = self.pos - 3;
-        let mut s = String::new();
-        while self.peek() != '\0' {
-            if self.peek() == '>' && self.peek_at(1) == '>' && self.peek_at(2) == '>' {
-                self.advance();
-                self.advance();
-                self.advance();
-                return Token::new(TokenKind::RawBlock(interner.intern(&s)), line, col, self.pos - start_pos_full);
+        let start_raw = self.pos;
+        let start_char_pos = self.char_pos - 3;
+        while self.peek() != b'\0' {
+            if self.source[self.pos..].starts_with(b">>>") {
+                let parsed_str = std::str::from_utf8(&self.source[start_raw..self.pos]).unwrap_or_default();
+                self.advance(); self.advance(); self.advance();
+                return Token::new(TokenKind::RawBlock(interner.intern(parsed_str)), line, col, self.char_pos - start_char_pos);
             }
-            s.push(self.advance());
+            self.advance();
         }
         Token::new(TokenKind::Unknown('<'), line, col, 3)
     }

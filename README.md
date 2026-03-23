@@ -1,4 +1,4 @@
-# XCX 2.0
+# XCX 2.1
 
 ![](https://raw.githubusercontent.com/xcx-lang/xcx-vscode/main/images/banner.png)
 

@@ -5,7 +5,7 @@ use crate::sema::interner::Interner;
 use crate::sema::interner::StringId;
 
 pub struct Parser<'a> {
-    scanner: Scanner,
+    scanner: Scanner<'a>,
     interner: Interner,
     source: &'a str,
     current: Token,
@@ -36,7 +36,7 @@ impl<'a> Parser<'a> {
         Self::new_with_interner(source, scanner, Interner::new())
     }
 
-    pub fn new_with_interner(source: &'a str, mut scanner: Scanner, mut interner: Interner) -> Self {
+    pub fn new_with_interner(source: &'a str, mut scanner: Scanner<'a>, mut interner: Interner) -> Self {
         let current = scanner.next_token(&mut interner);
         let peek = scanner.next_token(&mut interner);
         Self {
@@ -1164,24 +1164,6 @@ impl<'a> Parser<'a> {
                 self.expect_semicolon();
                 Some(crate::parser::ast::Expr {
                     kind: crate::parser::ast::ExprKind::ArrayLiteral { elements },
-                    span: lit_span,
-                })
-            }
-        } else if self.current.kind == TokenKind::LeftBrace {
-            let lit_span = self.current.span.clone();
-            self.advance(); // past '{'
-            // In VarDecl, if we don't have an explicit Type::Set, we still might be 
-            // an array if ty is Type::Array.
-            if let Type::Array(_) = &ty {
-                let elements = self.parse_array_or_set_literal_elements(TokenKind::RightBrace);
-                Some(crate::parser::ast::Expr {
-                    kind: crate::parser::ast::ExprKind::ArrayLiteral { elements },
-                    span: lit_span,
-                })
-            } else {
-                let elements = self.parse_array_or_set_literal_elements(TokenKind::RightBrace);
-                Some(crate::parser::ast::Expr {
-                    kind: crate::parser::ast::ExprKind::ArrayOrSetLiteral { elements },
                     span: lit_span,
                 })
             }

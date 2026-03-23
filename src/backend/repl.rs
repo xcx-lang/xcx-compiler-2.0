@@ -10,7 +10,7 @@ pub fn run_repl() {
     println!("XCX Interactive Mode (REPL)");
     println!("Type '!help' for assistance or '.terminal !exit;' to quit.");
 
-    let mut vm = VM::new();
+    let vm = std::sync::Arc::new(VM::new());
     let mut symbols = SymbolTable::new();
     let mut compiler = Compiler::new();
     let mut interner = crate::sema::interner::Interner::new();
@@ -75,13 +75,13 @@ pub fn run_repl() {
             continue;
         }
 
-        let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         
-        let ctx = crate::backend::vm::VMContext {
-            constants: &constants,
-            functions: &functions,
+        let ctx = crate::backend::vm::SharedContext {
+            constants,
+            functions,
         };
-        vm.run(&bytecode, &ctx);
+        vm.clone().run(main_chunk, ctx);
     }
 }
 

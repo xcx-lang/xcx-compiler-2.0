@@ -10,6 +10,8 @@ XCX uses a **Pratt Parser** (Top-Down Operator Precedence).
 - **Lookahead**: One token (`current` + `peek`), advanced manually with `advance()`.
 - **Error Recovery**: On syntax error, `synchronize()` skips tokens until the next semicolon or a known statement-starting keyword (`func`, `fiber`, `if`, `for`, etc.).
 
+The `Parser` struct borrows the source string for the lifetime `'a`, and `Scanner<'a>` is parameterised by the same lifetime, reflecting the byte-slice-based scanner.
+
 ### Precedence Levels (lowest → highest)
 
 | Level | Operators |
@@ -33,14 +35,14 @@ XCX uses a **Pratt Parser** (Top-Down Operator Precedence).
 XCX supports two syntactically different styles for defining functions:
 
 **Brace style** (C-like):
-```
+```xcx
 func name(i: x, s: y -> i) {
     return x + 1;
 }
 ```
 
 **XCX style** (keyword block):
-```
+```xcx
 func:i: name(i: x, s: y) do;
     return x + 1;
 end;

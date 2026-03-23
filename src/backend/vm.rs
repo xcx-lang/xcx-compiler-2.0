@@ -1,15 +1,21 @@
-extern crate tiny_http;
-extern crate ureq;
-extern crate serde_json;
-extern crate bcrypt;
-extern crate argon2;
-extern crate hex;
+use std::sync::Arc;
+use parking_lot::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, PasswordHash, SaltString};
 use rand::Rng;
 
 
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodKind {
+    Push, Pop, Len, Count, Size, IsEmpty, Clear, Contains, Get, Insert, Update, Delete, Find, Join, Show, Sort, Reverse,
+    Add, Remove, Has, Length, Upper, Lower, Trim, IndexOf, LastIndexOf, Replace, Slice, Split, StartsWith, EndsWith,
+    ToInt, ToFloat, Set, Keys, Values, Where, Year, Month, Day, Hour, Minute, Second, Format, Exists, Append, Inject, ToStr,
+    Next, Run, IsDone, Close,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
@@ -50,7 +56,8 @@ pub enum OpCode {
     ReturnVoid,
     Halt,
     ArrayInit(usize),
-    MethodCall(usize, usize),
+    MethodCall(MethodKind, usize),
+    MethodCallCustom(usize, usize),
     SetInit(usize),
     SetUnion,
     SetIntersection,
@@ -73,10 +80,6 @@ pub enum OpCode {
     JsonInject(usize),
     JsonInjectLocal(usize),
     FiberCreate(usize, usize),
-    FiberNext,
-    FiberRun,
-    FiberIsDone,
-    FiberClose,
     Yield,
     YieldVoid,
     HttpCall(usize), // method index
@@ -102,15 +105,15 @@ pub enum Value {
     Float(f64),
     String(String),
     Bool(bool),
-    Array(std::rc::Rc<std::cell::RefCell<Vec<Value>>>),
-    Set(std::rc::Rc<std::cell::RefCell<std::collections::BTreeSet<Value>>>),
-    Map(std::rc::Rc<std::cell::RefCell<Vec<(Value, Value)>>>),
+    Array(Arc<RwLock<Vec<Value>>>),
+    Set(Arc<RwLock<std::collections::BTreeSet<Value>>>),
+    Map(Arc<RwLock<Vec<(Value, Value)>>>),
     Date(chrono::NaiveDateTime),
-    Table(std::rc::Rc<std::cell::RefCell<TableData>>),
+    Table(Arc<RwLock<TableData>>),
     Function(usize),
-    Row(std::rc::Rc<std::cell::RefCell<TableData>>, usize),
-    Json(std::rc::Rc<std::cell::RefCell<serde_json::Value>>),
-    Fiber(std::rc::Rc<std::cell::RefCell<FiberState>>),
+    Row(Arc<RwLock<TableData>>, usize),
+    Json(Arc<RwLock<serde_json::Value>>),
+    Fiber(Arc<RwLock<FiberState>>),
 }
 
 impl Eq for Value {}
@@ -122,15 +125,15 @@ impl PartialEq for Value {
             (Value::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::Array(a), Value::Array(b)) => std::rc::Rc::ptr_eq(a, b) || *a.borrow() == *b.borrow(),
-            (Value::Set(a), Value::Set(b)) => std::rc::Rc::ptr_eq(a, b) || *a.borrow() == *b.borrow(),
-            (Value::Map(a), Value::Map(b)) => std::rc::Rc::ptr_eq(a, b) || *a.borrow() == *b.borrow(),
+            (Value::Array(a), Value::Array(b)) => Arc::ptr_eq(a, b) || *a.read() == *b.read(),
+            (Value::Set(a), Value::Set(b)) => Arc::ptr_eq(a, b) || *a.read() == *b.read(),
+            (Value::Map(a), Value::Map(b)) => Arc::ptr_eq(a, b) || *a.read() == *b.read(),
             (Value::Date(a), Value::Date(b)) => a == b,
-            (Value::Table(a), Value::Table(b)) => std::rc::Rc::ptr_eq(a, b),
+            (Value::Table(a), Value::Table(b)) => Arc::ptr_eq(a, b),
             (Value::Function(a), Value::Function(b)) => a == b,
-            (Value::Row(a, ai), Value::Row(b, bi)) => std::rc::Rc::ptr_eq(a, b) && ai == bi,
-            (Value::Json(a), Value::Json(b)) => std::rc::Rc::ptr_eq(a, b) || *a.borrow() == *b.borrow(),
-            (Value::Fiber(a), Value::Fiber(b)) => std::rc::Rc::ptr_eq(a, b),
+            (Value::Row(a, ai), Value::Row(b, bi)) => Arc::ptr_eq(a, b) && ai == bi,
+            (Value::Json(a), Value::Json(b)) => Arc::ptr_eq(a, b) || *a.read() == *b.read(),
+            (Value::Fiber(a), Value::Fiber(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -150,25 +153,25 @@ impl Ord for Value {
             (a, b) if a.is_numeric() && b.is_numeric() => std::cmp::Ordering::Equal,
             (a, b) if a.variant_rank() != b.variant_rank() => a.variant_rank().cmp(&b.variant_rank()),
             (Value::Array(a), Value::Array(b)) => {
-                if std::rc::Rc::ptr_eq(a, b) { std::cmp::Ordering::Equal }
-                else { a.borrow().cmp(&b.borrow()) }
+                if Arc::ptr_eq(a, b) { std::cmp::Ordering::Equal }
+                else { a.read().cmp(&b.read()) }
             }
             (Value::Set(a), Value::Set(b)) => {
-                if std::rc::Rc::ptr_eq(a, b) { std::cmp::Ordering::Equal }
-                else { a.borrow().cmp(&b.borrow()) }
+                if Arc::ptr_eq(a, b) { std::cmp::Ordering::Equal }
+                else { a.read().cmp(&b.read()) }
             }
-            (Value::Table(a), Value::Table(b)) => (a.as_ptr() as usize).cmp(&(b.as_ptr() as usize)),
+            (Value::Table(a), Value::Table(b)) => (Arc::as_ptr(a) as usize).cmp(&(Arc::as_ptr(b) as usize)),
             (Value::Row(a, ai), Value::Row(b, bi)) => {
-                if std::rc::Rc::ptr_eq(a, b) { ai.cmp(bi) }
-                else { (a.as_ptr() as usize).cmp(&(b.as_ptr() as usize)) }
+                if Arc::ptr_eq(a, b) { ai.cmp(bi) }
+                else { (Arc::as_ptr(a) as usize).cmp(&(Arc::as_ptr(b) as usize)) }
             }
-            (Value::Json(a), Value::Json(b)) => a.borrow().to_string().cmp(&b.borrow().to_string()),
-            (Value::Fiber(a), Value::Fiber(b)) => (a.as_ptr() as usize).cmp(&(b.as_ptr() as usize)),
+            (Value::Json(a), Value::Json(b)) => a.read().to_string().cmp(&b.read().to_string()),
+            (Value::Fiber(a), Value::Fiber(b)) => (Arc::as_ptr(a) as usize).cmp(&(Arc::as_ptr(b) as usize)),
             (Value::Map(a), Value::Map(b)) => {
-                if std::rc::Rc::ptr_eq(a, b) { std::cmp::Ordering::Equal }
+                if Arc::ptr_eq(a, b) { std::cmp::Ordering::Equal }
                 else {
-                    let am = a.borrow();
-                    let bm = b.borrow();
+                    let am = a.read();
+                    let bm = b.read();
                     am.len().cmp(&bm.len()).then_with(|| {
                         for (ai, bi) in am.iter().zip(bm.iter()) {
                             let c = ai.0.cmp(&bi.0).then_with(|| ai.1.cmp(&bi.1));
@@ -249,7 +252,7 @@ impl std::fmt::Display for Value {
             Value::String(v) => write!(f, "{}", v),
             Value::Bool(v) => write!(f, "{}", v),
             Value::Array(arr) => {
-                let b = arr.borrow();
+                let b = arr.read();
                 write!(f, "[")?;
                 for (i, val) in b.iter().enumerate() {
                     if i > 0 { write!(f, ", ")?; }
@@ -258,7 +261,7 @@ impl std::fmt::Display for Value {
                 write!(f, "]")
             }
             Value::Set(s) => {
-                let b = s.borrow();
+                let b = s.read();
                 write!(f, "{{")?;
                 for (i, val) in b.iter().enumerate() {
                     if i > 0 { write!(f, ", ")?; }
@@ -267,7 +270,7 @@ impl std::fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Map(m) => {
-                let b = m.borrow();
+                let b = m.read();
                 write!(f, "{{")?;
                 for (i, (k, v)) in b.iter().enumerate() {
                     if i > 0 { write!(f, ", ")?; }
@@ -276,12 +279,12 @@ impl std::fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Date(d) => write!(f, "{}", d.format("%Y-%m-%d")),
-            Value::Table(t) => write!(f, "Table(rows: {})", t.borrow().rows.len()),
+            Value::Table(t) => write!(f, "Table(rows: {})", t.read().rows.len()),
             Value::Function(id) => write!(f, "Function({})", id),
             Value::Row(_, idx) => write!(f, "Row({})", idx),
-            Value::Json(v) => write!(f, "Json({})", v.borrow()),
+            Value::Json(v) => write!(f, "Json({})", v.read()),
             Value::Fiber(fiber_rc) => {
-                let fiber = fiber_rc.borrow();
+                let fiber = fiber_rc.read();
                 if fiber.is_done { write!(f, "Fiber(done)") }
                 else { write!(f, "Fiber(ip={})", fiber.ip) }
             }
@@ -291,23 +294,22 @@ impl std::fmt::Display for Value {
 
 #[derive(Clone)]
 pub struct FunctionChunk {
-    pub bytecode: Vec<OpCode>,
+    pub bytecode: Arc<Vec<OpCode>>,
+    pub spans: Arc<Vec<crate::lexer::token::Span>>,
     pub is_fiber: bool,
     pub max_locals: usize,
 }
 
-pub struct VMContext<'a> {
-    pub constants: &'a [Value],
-    pub functions: &'a [FunctionChunk],
+#[derive(Clone)]
+pub struct SharedContext {
+    pub constants: Arc<Vec<Value>>,
+    pub functions: Arc<Vec<FunctionChunk>>,
 }
 
 pub struct VM {
-    stack: Vec<Value>,
-    globals: Vec<Value>,
-    error_count: usize,
-    call_depth: usize,
-    fiber_yielded: bool,
-    pub servers: std::collections::HashMap<String, std::rc::Rc<tiny_http::Server>>,
+    pub globals: Arc<RwLock<Vec<Value>>>,
+    pub error_count: std::sync::atomic::AtomicUsize,
+    pub servers: Arc<RwLock<std::collections::HashMap<String, Arc<tiny_http::Server>>>>,
 }
 
 const MAX_CALL_DEPTH: usize = 800;
@@ -327,23 +329,27 @@ impl VM {
         enable_ansi_support();
 
         Self {
-            stack: Vec::with_capacity(128),
-            globals: vec![Value::Bool(false); 1024],
-            error_count: 0,
-            call_depth: 0,
-            fiber_yielded: false,
-            servers: std::collections::HashMap::new(),
+            globals: Arc::new(RwLock::new(vec![Value::Bool(false); 1024])),
+            error_count: std::sync::atomic::AtomicUsize::new(0),
+            servers: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
 
     #[allow(dead_code)]
     pub fn get_global(&self, idx: usize) -> Option<Value> {
-        self.globals.get(idx).cloned()
+        self.globals.read().get(idx).cloned()
     }
 
-    pub fn run(&mut self, bytecode: &[OpCode], ctx: &VMContext) {
-        let mut executor = Executor { vm: self, ctx };
-        executor.execute_bytecode(bytecode, &mut 0, &mut Vec::new());
+    pub fn run(self: Arc<Self>, main_chunk: FunctionChunk, ctx: SharedContext) {
+        let mut executor = Executor {
+            vm: self.clone(),
+            ctx,
+            current_spans: None, // Will be set in run_frame
+            stack: Vec::with_capacity(128),
+            call_depth: 0,
+            fiber_yielded: false,
+        };
+        executor.run_frame_owned(main_chunk);
     }
 }
 
@@ -373,9 +379,13 @@ fn enable_ansi_support() {
     }
 }
 
-struct Executor<'a, 'b> {
-    vm: &'b mut VM,
-    ctx: &'a VMContext<'a>,
+struct Executor {
+    vm: Arc<VM>,
+    ctx: SharedContext,
+    current_spans: Option<Arc<Vec<crate::lexer::token::Span>>>,
+    stack: Vec<Value>,
+    call_depth: usize,
+    fiber_yielded: bool,
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -395,7 +405,7 @@ fn json_path_to_value(root: &serde_json::Value, path: &str) -> Option<Value> {
             else { Value::Int(0) },
         serde_json::Value::String(s) => Value::String(s),
         serde_json::Value::Bool(b) => Value::Bool(b),
-        other => Value::Json(std::rc::Rc::new(std::cell::RefCell::new(other))),
+        other => Value::Json(Arc::new(RwLock::new(other))),
     })
 }
 
@@ -498,8 +508,8 @@ fn join_tables(
         let _ = ci;
     }
 
-    let left_rc  = std::rc::Rc::new(std::cell::RefCell::new(left.clone()));
-    let right_rc = std::rc::Rc::new(std::cell::RefCell::new(right.clone()));
+    let left_rc  = Arc::new(RwLock::new(left.clone()));
+    let right_rc = Arc::new(RwLock::new(right.clone()));
     let mut out_rows: Vec<Vec<Value>> = Vec::new();
 
     for li in 0..left.rows.len() {
@@ -540,7 +550,16 @@ fn join_tables(
 
 
 
-impl<'a, 'b> Executor<'a, 'b> {
+impl Executor {
+    fn current_span_info(&self, ip: usize) -> String {
+        if let Some(spans) = &self.current_spans {
+            if ip > 0 && ip <= spans.len() {
+                let s = &spans[ip - 1];
+                return format!(" [line: {}, col: {}]", s.line, s.col);
+            }
+        }
+        "".to_string()
+    }
 
     fn execute_step(
         &mut self,
@@ -550,49 +569,51 @@ impl<'a, 'b> Executor<'a, 'b> {
     ) -> OpResult {
         match op {
             OpCode::Constant(idx) => {
-                self.vm.stack.push(self.ctx.constants[idx].clone());
+                self.stack.push(self.ctx.constants[idx].clone());
                 OpResult::Continue
             }
             OpCode::GetVar(idx) => {
-                if idx >= self.vm.globals.len() {
-                    self.vm.stack.push(Value::Bool(false));
+                let glbs = self.vm.globals.read();
+                if idx >= glbs.len() {
+                    self.stack.push(Value::Bool(false));
                     return OpResult::Halt;
                 }
-                self.vm.stack.push(self.vm.globals[idx].clone());
+                self.stack.push(glbs[idx].clone());
                 OpResult::Continue
             }
             OpCode::SetVar(idx) => {
-                let val = self.vm.stack.pop().expect("SetVar: empty stack");
-                if idx >= self.vm.globals.len() {
-                    self.vm.globals.resize(idx + 1, Value::Bool(false));
+                let val = self.stack.pop().expect("SetVar: empty stack");
+                let mut glbs = self.vm.globals.write();
+                if idx >= glbs.len() {
+                    glbs.resize(idx + 1, Value::Bool(false));
                 }
-                self.vm.globals[idx] = val;
+                glbs[idx] = val;
                 OpResult::Continue
             }
             OpCode::GetLocal(idx) => {
-                self.vm.stack.push(locals.get(idx).cloned().unwrap_or(Value::Bool(false)));
+                self.stack.push(locals.get(idx).cloned().unwrap_or(Value::Bool(false)));
                 OpResult::Continue
             }
             OpCode::SetLocal(idx) => {
-                let val = self.vm.stack.pop().expect("SetLocal: empty stack");
+                let val = self.stack.pop().expect("SetLocal: empty stack");
                 if idx >= locals.len() { locals.resize(idx + 1, Value::Bool(false)); }
                 locals[idx] = val;
                 OpResult::Continue
             }
-            OpCode::Pop => { self.vm.stack.pop(); OpResult::Continue }
-
+            OpCode::Pop => { self.stack.pop(); OpResult::Continue }
+ 
             OpCode::Jump(offset) => OpResult::Jump(offset),
             OpCode::JumpIfFalse(offset) => {
-                let val = self.vm.stack.pop().unwrap_or(Value::Bool(true));
+                let val = self.stack.pop().unwrap_or(Value::Bool(true));
                 if matches!(val, Value::Bool(false)) { OpResult::Jump(offset) } else { OpResult::Continue }
             }
             OpCode::JumpIfTrue(offset) => {
-                let val = self.vm.stack.pop().unwrap_or(Value::Bool(false));
+                let val = self.stack.pop().unwrap_or(Value::Bool(false));
                 if matches!(val, Value::Bool(true)) { OpResult::Jump(offset) } else { OpResult::Continue }
             }
-            OpCode::Return    => OpResult::Return(self.vm.stack.pop()),
+            OpCode::Return    => OpResult::Return(self.stack.pop()),
             OpCode::ReturnVoid => OpResult::Return(None),
-            OpCode::Yield     => OpResult::Yield(self.vm.stack.pop()),
+            OpCode::Yield     => OpResult::Yield(self.stack.pop()),
             OpCode::YieldVoid => OpResult::Yield(None),
             OpCode::Halt      => OpResult::Halt,
             OpCode::TerminalExit  => OpResult::Halt,
@@ -610,11 +631,11 @@ impl<'a, 'b> Executor<'a, 'b> {
                 
                 use std::io::Write;
                 std::io::stdout().flush().unwrap();
-                self.vm.stack.push(Value::Bool(true));
+                self.stack.push(Value::Bool(true));
                 OpResult::Continue
             }
             OpCode::TerminalRun => {
-                let filename_val = self.vm.stack.pop().expect("TerminalRun: empty stack");
+                let filename_val = self.stack.pop().expect("TerminalRun: empty stack");
                 let filename = match filename_val {
                     Value::String(s) => s,
                     other => other.to_string(),
@@ -627,64 +648,64 @@ impl<'a, 'b> Executor<'a, 'b> {
                     .status() 
                 {
                     Ok(status) => {
-                        self.vm.stack.push(Value::Bool(status.success()));
+                        self.stack.push(Value::Bool(status.success()));
                     }
                     Err(e) => {
-                        eprintln!("Failed to execute !run {}: {}", filename, e);
-                        self.vm.stack.push(Value::Bool(false));
+                        eprintln!("Failed to execute !run {}: {}{}", filename, e, self.current_span_info(*_ip));
+                        self.stack.push(Value::Bool(false));
                     }
                 }
                 OpResult::Continue
             }
-
+ 
             OpCode::Wait => {
-                let ms_val = self.vm.stack.pop().expect("Wait: expected duration on stack");
+                let ms_val = self.stack.pop().expect("Wait: expected duration on stack");
                 let ms: u64 = match ms_val {
                     Value::Int(n) if n >= 0 => n as u64,
                     Value::Float(f) if f >= 0.0 => f as u64,
                     other => {
-                        eprintln!("halt.error: @wait requires a non-negative Int or Float, got {:?}", other);
+                        eprintln!("halt.error: @wait requires a non-negative Int or Float, got {:?}{}", other, self.current_span_info(*_ip));
                         return OpResult::Halt;
                     }
                 };
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 OpResult::Continue
             }
-
+ 
             OpCode::EnvGet => {
-                let name_val = self.vm.stack.pop().expect("EnvGet: expected var name on stack");
+                let name_val = self.stack.pop().expect("EnvGet: expected var name on stack");
                 let name = name_val.to_string();
                 match std::env::var(&name) {
                     Ok(val) => {
-                        self.vm.stack.push(Value::String(val));
+                        self.stack.push(Value::String(val));
                     }
                     Err(_) => {
-                        eprintln!("halt.error: env variable \"{}\" is not set", name);
+                        eprintln!("halt.error: env variable \"{}\" is not set{}", name, self.current_span_info(*_ip));
                         return OpResult::Halt;
                     }
                 }
                 OpResult::Continue
             }
-
+ 
             OpCode::EnvArgs => {
                 let args: Vec<Value> = std::env::args()
                     .map(|s| Value::String(s))
                     .collect();
-                self.vm.stack.push(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(args))));
+                self.stack.push(Value::Array(Arc::new(RwLock::new(args))));
                 OpResult::Continue
             }
-
+ 
             OpCode::CryptoHash => {
-                let algo_val = self.vm.stack.pop().expect("CryptoHash: expected algo");
-                let pwd_val  = self.vm.stack.pop().expect("CryptoHash: expected password");
+                let algo_val = self.stack.pop().expect("CryptoHash: expected algo");
+                let pwd_val  = self.stack.pop().expect("CryptoHash: expected password");
                 let algo = algo_val.to_string();
                 let password = pwd_val.to_string();
-
+ 
                 let res = match algo.as_str() {
                     "bcrypt" => {
                         match bcrypt::hash(&password, bcrypt::DEFAULT_COST) {
                             Ok(h) => Value::String(h),
-                            Err(_) => { eprintln!("halt.error: bcrypt hashing failed"); return OpResult::Halt; }
+                            Err(_) => { eprintln!("halt.error: bcrypt hashing failed{}", self.current_span_info(*_ip)); return OpResult::Halt; }
                         }
                     }
                     "argon2" => {
@@ -696,22 +717,22 @@ impl<'a, 'b> Executor<'a, 'b> {
                             Ok(p) => {
                                 Value::String(p.to_string())
                             }
-                            Err(_) => { eprintln!("halt.error: argon2 hashing failed"); return OpResult::Halt; }
+                            Err(_) => { eprintln!("halt.error: argon2 hashing failed{}", self.current_span_info(*_ip)); return OpResult::Halt; }
                         }
                     }
                     _ => {
-                        eprintln!("halt.error: unknown crypto algorithm: {}", algo);
+                        eprintln!("halt.error: unknown crypto algorithm: {}{}", algo, self.current_span_info(*_ip));
                         return OpResult::Halt;
                     }
                 };
-                self.vm.stack.push(res);
+                self.stack.push(res);
                 OpResult::Continue
             }
 
             OpCode::CryptoVerify => {
-                let algo_val = self.vm.stack.pop().expect("CryptoVerify: expected algo");
-                let hash_val = self.vm.stack.pop().expect("CryptoVerify: expected hash");
-                let pwd_val  = self.vm.stack.pop().expect("CryptoVerify: expected password");
+                let algo_val = self.stack.pop().expect("CryptoVerify: expected algo");
+                let hash_val = self.stack.pop().expect("CryptoVerify: expected hash");
+                let pwd_val  = self.stack.pop().expect("CryptoVerify: expected password");
                 
                 let algo = algo_val.to_string();
                 let hashed = hash_val.to_string();
@@ -724,23 +745,23 @@ impl<'a, 'b> Executor<'a, 'b> {
                     "argon2" => {
                         match PasswordHash::new(&hashed) {
                             Ok(parsed_hash) => argon2::Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok(),
-                            Err(_) => { eprintln!("halt.error: invalid argon2 hash format"); return OpResult::Halt; }
+                            Err(_) => { eprintln!("halt.error: invalid argon2 hash format{}", self.current_span_info(*_ip)); return OpResult::Halt; }
                         }
                     }
                     _ => {
-                        eprintln!("halt.error: unknown crypto algorithm for verification: {}", algo);
+                        eprintln!("halt.error: unknown crypto algorithm for verification: {}{}", algo, self.current_span_info(*_ip));
                         return OpResult::Halt;
                     }
                 };
-                self.vm.stack.push(Value::Bool(is_ok));
+                self.stack.push(Value::Bool(is_ok));
                 OpResult::Continue
             }
 
             OpCode::CryptoToken => {
-                let len_val = self.vm.stack.pop().expect("CryptoToken: expected length");
+                let len_val = self.stack.pop().expect("CryptoToken: expected length");
                 let len = match len_val {
                     Value::Int(n) if n > 0 => n as usize,
-                    _ => { eprintln!("halt.error: crypto.token requires a positive Int length"); return OpResult::Halt; }
+                    _ => { eprintln!("halt.error: crypto.token requires a positive Int length{}", self.current_span_info(*_ip)); return OpResult::Halt; }
                 };
                 
                 let mut bytes = vec![0u8; (len + 1) / 2];
@@ -749,13 +770,13 @@ impl<'a, 'b> Executor<'a, 'b> {
                 if hex_str.len() > len {
                     hex_str.truncate(len);
                 }
-                self.vm.stack.push(Value::String(hex_str));
+                self.stack.push(Value::String(hex_str));
                 OpResult::Continue
             }
 
             OpCode::Add => {
-                let b = self.vm.stack.pop().expect("Add: rhs");
-                let a = self.vm.stack.pop().expect("Add: lhs");
+                let b = self.stack.pop().expect("Add: rhs");
+                let a = self.stack.pop().expect("Add: lhs");
                 let res = match (a, b) {
                     (Value::Int(a), Value::Int(b))     => Value::Int(a.wrapping_add(b)),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
@@ -764,16 +785,16 @@ impl<'a, 'b> Executor<'a, 'b> {
                     (Value::String(a), b)              => Value::String(format!("{}{}", a, b)),
                     (a, Value::String(b))              => Value::String(format!("{}{}", a, b)),
                     (Value::Date(d), Value::Int(days)) => Value::Date(d + chrono::TimeDelta::days(days)),
-                    (Value::Set(a), Value::Set(b))     => Value::Set(std::rc::Rc::new(std::cell::RefCell::new(
-                        set_op(&a.borrow(), &b.borrow(), 0)))),
+                    (Value::Set(a), Value::Set(b))     => Value::Set(Arc::new(RwLock::new(
+                        set_op(&a.read(), &b.read(), 0)))),
                     _ => Value::Bool(false),
                 };
-                self.vm.stack.push(res);
+                self.stack.push(res);
                 OpResult::Continue
             }
             OpCode::Sub => {
-                let b = self.vm.stack.pop().expect("Sub: rhs");
-                let a = self.vm.stack.pop().expect("Sub: lhs");
+                let b = self.stack.pop().expect("Sub: rhs");
+                let a = self.stack.pop().expect("Sub: lhs");
                 let res = match (a, b) {
                     (Value::Int(a), Value::Int(b))     => Value::Int(a.wrapping_sub(b)),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
@@ -781,158 +802,158 @@ impl<'a, 'b> Executor<'a, 'b> {
                     (Value::Float(a), Value::Int(b))   => Value::Float(a - b as f64),
                     (Value::Date(d), Value::Int(days)) => Value::Date(d - chrono::TimeDelta::days(days)),
                     (Value::Date(a), Value::Date(b))   => Value::Int((a - b).num_days()),
-                    (Value::Set(a), Value::Set(b))     => Value::Set(std::rc::Rc::new(std::cell::RefCell::new(
-                        set_op(&a.borrow(), &b.borrow(), 2)))),
+                    (Value::Set(a), Value::Set(b))     => Value::Set(Arc::new(RwLock::new(
+                        set_op(&a.read(), &b.read(), 2)))),
                     _ => Value::Bool(false),
                 };
-                self.vm.stack.push(res);
+                self.stack.push(res);
                 OpResult::Continue
             }
             OpCode::Mul => {
-                let b = self.vm.stack.pop().expect("Mul: rhs");
-                let a = self.vm.stack.pop().expect("Mul: lhs");
+                let b = self.stack.pop().expect("Mul: rhs");
+                let a = self.stack.pop().expect("Mul: lhs");
                 match (a, b) {
-                    (Value::Int(a), Value::Int(b))     => self.vm.stack.push(Value::Int(a.wrapping_mul(b))),
-                    (Value::Float(a), Value::Float(b)) => self.vm.stack.push(Value::Float(a * b)),
-                    (Value::Int(a), Value::Float(b))   => self.vm.stack.push(Value::Float(a as f64 * b)),
-                    (Value::Float(a), Value::Int(b))   => self.vm.stack.push(Value::Float(a * b as f64)),
+                    (Value::Int(a), Value::Int(b))     => self.stack.push(Value::Int(a.wrapping_mul(b))),
+                    (Value::Float(a), Value::Float(b)) => self.stack.push(Value::Float(a * b)),
+                    (Value::Int(a), Value::Float(b))   => self.stack.push(Value::Float(a as f64 * b)),
+                    (Value::Float(a), Value::Int(b))   => self.stack.push(Value::Float(a * b as f64)),
                     (Value::Set(a), Value::Set(b))     => {
-                        self.vm.stack.push(Value::Set(std::rc::Rc::new(std::cell::RefCell::new(
-                            set_op(&a.borrow(), &b.borrow(), 1)))));
+                        self.stack.push(Value::Set(Arc::new(RwLock::new(
+                            set_op(&a.read(), &b.read(), 1)))));
                     }
                     (a, b) => {
-                        eprintln!("ERROR: Cannot multiply {:?} and {:?}", a, b);
-                        self.vm.stack.push(Value::Int(0));
+                        eprintln!("ERROR: Cannot multiply {:?} and {:?}{}", a, b, self.current_span_info(*_ip));
+                        self.stack.push(Value::Int(0));
                         return OpResult::Halt;
                     }
                 }
                 OpResult::Continue
             }
             OpCode::Div => {
-                let b = self.vm.stack.pop().expect("Div: rhs");
-                let a = self.vm.stack.pop().expect("Div: lhs");
+                let b = self.stack.pop().expect("Div: rhs");
+                let a = self.stack.pop().expect("Div: lhs");
                 match (a, b) {
                     (Value::Int(a), Value::Int(b)) => {
-                        if b == 0 { eprintln!("R300: Division by zero"); return OpResult::Halt; }
-                        self.vm.stack.push(Value::Int(a / b));
+                        if b == 0 { eprintln!("R300: Division by zero{}", self.current_span_info(*_ip)); return OpResult::Halt; }
+                        self.stack.push(Value::Int(a / b));
                     }
                     (Value::Float(a), Value::Float(b)) => {
-                        if b == 0.0 { eprintln!("R300: Division by zero (float)"); return OpResult::Halt; }
-                        self.vm.stack.push(Value::Float(a / b));
+                        if b == 0.0 { eprintln!("R300: Division by zero (float){}", self.current_span_info(*_ip)); return OpResult::Halt; }
+                        self.stack.push(Value::Float(a / b));
                     }
                     (Value::Int(a), Value::Float(b)) => {
-                        if b == 0.0 { eprintln!("R300: Division by zero"); return OpResult::Halt; }
-                        self.vm.stack.push(Value::Float(a as f64 / b));
+                        if b == 0.0 { eprintln!("R300: Division by zero{}", self.current_span_info(*_ip)); return OpResult::Halt; }
+                        self.stack.push(Value::Float(a as f64 / b));
                     }
                     (Value::Float(a), Value::Int(b)) => {
-                        if b == 0 { eprintln!("R300: Division by zero"); return OpResult::Halt; }
-                        self.vm.stack.push(Value::Float(a / b as f64));
+                        if b == 0 { eprintln!("R300: Division by zero{}", self.current_span_info(*_ip)); return OpResult::Halt; }
+                        self.stack.push(Value::Float(a / b as f64));
                     }
                     _ => return OpResult::Halt,
                 }
                 OpResult::Continue
             }
             OpCode::Mod => {
-                let b = self.vm.stack.pop().expect("Mod: rhs");
-                let a = self.vm.stack.pop().expect("Mod: lhs");
+                let b = self.stack.pop().expect("Mod: rhs");
+                let a = self.stack.pop().expect("Mod: lhs");
                 match (a, b) {
                     (Value::Int(a), Value::Int(b)) =>
-                        self.vm.stack.push(if b != 0 { Value::Int(a % b) } else { Value::Bool(false) }),
-                    (Value::Float(a), Value::Float(b)) => self.vm.stack.push(Value::Float(a % b)),
-                    _ => self.vm.stack.push(Value::Bool(false)),
+                        self.stack.push(if b != 0 { Value::Int(a % b) } else { Value::Bool(false) }),
+                    (Value::Float(a), Value::Float(b)) => self.stack.push(Value::Float(a % b)),
+                    _ => self.stack.push(Value::Bool(false)),
                 }
                 OpResult::Continue
             }
             OpCode::Pow => {
-                let b = self.vm.stack.pop().expect("Pow: rhs");
-                let a = self.vm.stack.pop().expect("Pow: lhs");
+                let b = self.stack.pop().expect("Pow: rhs");
+                let a = self.stack.pop().expect("Pow: lhs");
                 match (a, b) {
-                    (Value::Int(a), Value::Int(b))     => self.vm.stack.push(Value::Int(a.pow(b as u32))),
-                    (Value::Float(a), Value::Float(b)) => self.vm.stack.push(Value::Float(a.powf(b))),
-                    _ => self.vm.stack.push(Value::Bool(false)),
+                    (Value::Int(a), Value::Int(b))     => self.stack.push(Value::Int(a.pow(b as u32))),
+                    (Value::Float(a), Value::Float(b)) => self.stack.push(Value::Float(a.powf(b))),
+                    _ => self.stack.push(Value::Bool(false)),
                 }
                 OpResult::Continue
             }
             OpCode::IntConcat => {
-                let b = self.vm.stack.pop().expect("IntConcat: rhs");
-                let a = self.vm.stack.pop().expect("IntConcat: lhs");
+                let b = self.stack.pop().expect("IntConcat: rhs");
+                let a = self.stack.pop().expect("IntConcat: lhs");
                 let s = format!("{}{}", a, b);
-                self.vm.stack.push(s.parse::<i64>().map(Value::Int).unwrap_or(Value::String(s)));
+                self.stack.push(s.parse::<i64>().map(Value::Int).unwrap_or(Value::String(s)));
                 OpResult::Continue
             }
 
             OpCode::Equal => {
-                let b = self.vm.stack.pop().expect("Equal: rhs");
-                let a = self.vm.stack.pop().expect("Equal: lhs");
-                self.vm.stack.push(Value::Bool(a == b)); OpResult::Continue
+                let b = self.stack.pop().expect("Equal: rhs");
+                let a = self.stack.pop().expect("Equal: lhs");
+                self.stack.push(Value::Bool(a == b)); OpResult::Continue
             }
             OpCode::NotEqual => {
-                let b = self.vm.stack.pop().expect("NotEqual: rhs");
-                let a = self.vm.stack.pop().expect("NotEqual: lhs");
-                self.vm.stack.push(Value::Bool(a != b)); OpResult::Continue
+                let b = self.stack.pop().expect("NotEqual: rhs");
+                let a = self.stack.pop().expect("NotEqual: lhs");
+                self.stack.push(Value::Bool(a != b)); OpResult::Continue
             }
             OpCode::Greater => {
-                let b = self.vm.stack.pop().expect("Greater: rhs");
-                let a = self.vm.stack.pop().expect("Greater: lhs");
-                self.vm.stack.push(Value::Bool(a > b)); OpResult::Continue
+                let b = self.stack.pop().expect("Greater: rhs");
+                let a = self.stack.pop().expect("Greater: lhs");
+                self.stack.push(Value::Bool(a > b)); OpResult::Continue
             }
             OpCode::Less => {
-                let b = self.vm.stack.pop().expect("Less: rhs");
-                let a = self.vm.stack.pop().expect("Less: lhs");
-                self.vm.stack.push(Value::Bool(a < b)); OpResult::Continue
+                let b = self.stack.pop().expect("Less: rhs");
+                let a = self.stack.pop().expect("Less: lhs");
+                self.stack.push(Value::Bool(a < b)); OpResult::Continue
             }
             OpCode::GreaterEqual => {
-                let b = self.vm.stack.pop().expect("GreaterEqual: rhs");
-                let a = self.vm.stack.pop().expect("GreaterEqual: lhs");
-                self.vm.stack.push(Value::Bool(a >= b)); OpResult::Continue
+                let b = self.stack.pop().expect("GreaterEqual: rhs");
+                let a = self.stack.pop().expect("GreaterEqual: lhs");
+                self.stack.push(Value::Bool(a >= b)); OpResult::Continue
             }
             OpCode::LessEqual => {
-                let b = self.vm.stack.pop().expect("LessEqual: rhs");
-                let a = self.vm.stack.pop().expect("LessEqual: lhs");
-                self.vm.stack.push(Value::Bool(a <= b)); OpResult::Continue
+                let b = self.stack.pop().expect("LessEqual: rhs");
+                let a = self.stack.pop().expect("LessEqual: lhs");
+                self.stack.push(Value::Bool(a <= b)); OpResult::Continue
             }
             OpCode::And => {
-                let b = self.vm.stack.pop().expect("And: rhs");
-                let a = self.vm.stack.pop().expect("And: lhs");
+                let b = self.stack.pop().expect("And: rhs");
+                let a = self.stack.pop().expect("And: lhs");
                 match (a, b) {
-                    (Value::Bool(a), Value::Bool(b)) => self.vm.stack.push(Value::Bool(a && b)),
-                    _ => self.vm.stack.push(Value::Bool(false)),
+                    (Value::Bool(a), Value::Bool(b)) => self.stack.push(Value::Bool(a && b)),
+                    _ => self.stack.push(Value::Bool(false)),
                 }
                 OpResult::Continue
             }
             OpCode::Or => {
-                let b = self.vm.stack.pop().expect("Or: rhs");
-                let a = self.vm.stack.pop().expect("Or: lhs");
+                let b = self.stack.pop().expect("Or: rhs");
+                let a = self.stack.pop().expect("Or: lhs");
                 match (a, b) {
-                    (Value::Bool(a), Value::Bool(b)) => self.vm.stack.push(Value::Bool(a || b)),
-                    _ => self.vm.stack.push(Value::Bool(false)),
+                    (Value::Bool(a), Value::Bool(b)) => self.stack.push(Value::Bool(a || b)),
+                    _ => self.stack.push(Value::Bool(false)),
                 }
                 OpResult::Continue
             }
             OpCode::Not => {
-                let a = self.vm.stack.pop().expect("Not: operand");
+                let a = self.stack.pop().expect("Not: operand");
                 match a {
-                    Value::Bool(v) => self.vm.stack.push(Value::Bool(!v)),
-                    _ => self.vm.stack.push(Value::Bool(false)),
+                    Value::Bool(v) => self.stack.push(Value::Bool(!v)),
+                    _ => self.stack.push(Value::Bool(false)),
                 }
                 OpResult::Continue
             }
             OpCode::Has => {
-                let needle = self.vm.stack.pop().expect("Has: needle");
-                let col    = self.vm.stack.pop().expect("Has: collection");
+                let needle = self.stack.pop().expect("Has: needle");
+                let col    = self.stack.pop().expect("Has: collection");
                 let res = match (col, needle) {
                     (Value::String(av), Value::String(bv)) => av.contains(bv.as_str()),
-                    (Value::Array(arr), needle) => arr.borrow().contains(&needle),
-                    (Value::Set(s), needle)     => s.borrow().contains(&needle),
+                    (Value::Array(arr), needle) => arr.read().contains(&needle),
+                    (Value::Set(s), needle)     => s.read().contains(&needle),
                     _ => false,
                 };
-                self.vm.stack.push(Value::Bool(res));
+                self.stack.push(Value::Bool(res));
                 OpResult::Continue
             }
 
             OpCode::SetUnion | OpCode::SetIntersection | OpCode::SetDifference | OpCode::SetSymDifference => {
-                let b = self.vm.stack.pop().unwrap();
-                let a = self.vm.stack.pop().unwrap();
+                let b = self.stack.pop().unwrap();
+                let a = self.stack.pop().unwrap();
                 if let (Value::Set(a), Value::Set(b)) = (a, b) {
                     let op_id: u8 = match op {
                         OpCode::SetUnion        => 0,
@@ -940,50 +961,51 @@ impl<'a, 'b> Executor<'a, 'b> {
                         OpCode::SetDifference   => 2,
                         _                       => 3,
                     };
-                    self.vm.stack.push(Value::Set(std::rc::Rc::new(std::cell::RefCell::new(
-                        set_op(&a.borrow(), &b.borrow(), op_id)
+                    self.stack.push(Value::Set(Arc::new(RwLock::new(
+                        set_op(&a.read(), &b.read(), op_id)
                     ))));
                 } else {
-                    self.vm.stack.push(Value::Bool(false));
+                    self.stack.push(Value::Bool(false));
                 }
                 OpResult::Continue
             }
 
             OpCode::ArrayInit(count) => {
                 let mut elems: Vec<Value> = (0..count)
-                    .map(|_| self.vm.stack.pop().expect("ArrayInit: underflow"))
+                    .map(|_| self.stack.pop().expect("ArrayInit: underflow"))
                     .collect();
                 elems.reverse();
-                self.vm.stack.push(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(elems))));
+                self.stack.push(Value::Array(Arc::new(RwLock::new(elems))));
                 OpResult::Continue
             }
             OpCode::SetInit(count) => {
                 let elems: std::collections::BTreeSet<Value> = (0..count)
-                    .map(|_| self.vm.stack.pop().expect("SetInit: underflow"))
+                    .map(|_| self.stack.pop().expect("SetInit: underflow"))
                     .collect();
-                self.vm.stack.push(Value::Set(std::rc::Rc::new(std::cell::RefCell::new(elems))));
+                self.stack.push(Value::Set(Arc::new(RwLock::new(elems))));
                 OpResult::Continue
             }
             OpCode::MapInit(count) => {
                 let mut map: Vec<(Value, Value)> = Vec::with_capacity(count);
                 for _ in 0..count {
-                    let v = self.vm.stack.pop().expect("MapInit: val underflow");
-                    let k = self.vm.stack.pop().expect("MapInit: key underflow");
+                    let v = self.stack.pop().expect("MapInit: val underflow");
+                    let k = self.stack.pop().expect("MapInit: key underflow");
                     map.push((k, v));
                 }
                 map.reverse();
-                self.vm.stack.push(Value::Map(std::rc::Rc::new(std::cell::RefCell::new(map))));
+                self.stack.push(Value::Map(Arc::new(RwLock::new(map))));
                 OpResult::Continue
             }
+
             OpCode::SetRange => {
                 let has_step = matches!(
-                    self.vm.stack.pop().expect("SetRange: flag"),
+                    self.stack.pop().expect("SetRange: flag"),
                     Value::Bool(true)
                 );
-                let step_val = if has_step { self.vm.stack.pop().expect("SetRange: step") } else { Value::Int(1) };
-                let end_val   = self.vm.stack.pop().expect("SetRange: end");
-                let start_val = self.vm.stack.pop().expect("SetRange: start");
-
+                let step_val = if has_step { self.stack.pop().expect("SetRange: step") } else { Value::Int(1) };
+                let end_val   = self.stack.pop().expect("SetRange: end");
+                let start_val = self.stack.pop().expect("SetRange: start");
+ 
                 let mut elements: Vec<Value> = Vec::new();
                 match (start_val, end_val, step_val) {
                     (Value::Int(start), Value::Int(end), Value::Int(step)) => {
@@ -1019,37 +1041,37 @@ impl<'a, 'b> Executor<'a, 'b> {
                     }
                     _ => {}
                 }
-                self.vm.stack.push(Value::Set(std::rc::Rc::new(std::cell::RefCell::new(
+                self.stack.push(Value::Set(Arc::new(RwLock::new(
                     elements.into_iter().collect()
                 ))));
                 OpResult::Continue
             }
 
             OpCode::RandomChoice => {
-                let receiver = self.vm.stack.pop().unwrap();
+                let receiver = self.stack.pop().unwrap();
                 use rand::Rng;
                 let mut rng = rand::rng();
                 match receiver {
                     Value::Array(a) => {
-                        let arr = a.borrow();
-                        if arr.is_empty() { self.vm.stack.push(Value::Bool(false)); }
-                        else { self.vm.stack.push(arr[rng.random_range(0..arr.len())].clone()); }
+                        let arr = a.read();
+                        if arr.is_empty() { self.stack.push(Value::Bool(false)); }
+                        else { self.stack.push(arr[rng.random_range(0..arr.len())].clone()); }
                     }
                     Value::Set(s) => {
-                        let set = s.borrow();
-                        if set.is_empty() { self.vm.stack.push(Value::Bool(false)); }
+                        let set = s.read();
+                        if set.is_empty() { self.stack.push(Value::Bool(false)); }
                         else {
                             let val = set.iter().nth(rng.random_range(0..set.len())).unwrap().clone();
-                            self.vm.stack.push(val);
+                            self.stack.push(val);
                         }
                     }
-                    _ => self.vm.stack.push(Value::Bool(false)),
+                    _ => self.stack.push(Value::Bool(false)),
                 }
                 OpResult::Continue
             }
 
             OpCode::Print => {
-                let val = self.vm.stack.pop().expect("Print: empty stack");
+                let val = self.stack.pop().expect("Print: empty stack");
                 let s = val.to_string();
                 if s.contains('\x1B') || s.contains('\r') || s.ends_with('\n') {
                     print!("{}", s);
@@ -1067,7 +1089,7 @@ impl<'a, 'b> Executor<'a, 'b> {
                 let mut input = String::new();
                 io::stdin().read_line(&mut input).unwrap();
                 let t = input.trim();
-                self.vm.stack.push(
+                self.stack.push(
                     if let Ok(i) = t.parse::<i64>()      { Value::Int(i) }
                     else if let Ok(f) = t.parse::<f64>() { Value::Float(f) }
                     else if t == "true"                   { Value::Bool(true) }
@@ -1078,8 +1100,8 @@ impl<'a, 'b> Executor<'a, 'b> {
             }
 
             OpCode::StoreWrite => {
-                let content  = self.vm.stack.pop().unwrap();
-                let path_val = self.vm.stack.pop().unwrap();
+                let content  = self.stack.pop().unwrap();
+                let path_val = self.stack.pop().unwrap();
                 if let (Value::String(c), Value::String(p)) = (&content, &path_val) {
                     if !is_safe_path(p) { return OpResult::Halt; }
                     let path = std::path::Path::new(p);
@@ -1087,24 +1109,24 @@ impl<'a, 'b> Executor<'a, 'b> {
                         if !parent.as_os_str().is_empty() && std::fs::create_dir_all(parent).is_err() { return OpResult::Halt; }
                     }
                     if std::fs::write(p, c).is_err() { return OpResult::Halt; }
-                    self.vm.stack.push(Value::Bool(true));
+                    self.stack.push(Value::Bool(true));
                 } else { return OpResult::Halt; }
                 OpResult::Continue
             }
             OpCode::StoreRead => {
-                let path_val = self.vm.stack.pop().unwrap();
+                let path_val = self.stack.pop().unwrap();
                 if let Value::String(p) = &path_val {
                     if !is_safe_path(p) { return OpResult::Halt; }
                     match std::fs::read_to_string(p) {
-                        Ok(c) => self.vm.stack.push(Value::String(c)),
+                        Ok(c) => self.stack.push(Value::String(c)),
                         Err(_) => return OpResult::Halt,
                     }
                 } else { return OpResult::Halt; }
                 OpResult::Continue
             }
             OpCode::StoreAppend => {
-                let content  = self.vm.stack.pop().unwrap();
-                let path_val = self.vm.stack.pop().unwrap();
+                let content  = self.stack.pop().unwrap();
+                let path_val = self.stack.pop().unwrap();
                 if let (Value::String(c), Value::String(p)) = (&content, &path_val) {
                     if !is_safe_path(p) { return OpResult::Halt; }
                     let path = std::path::Path::new(p);
@@ -1116,20 +1138,20 @@ impl<'a, 'b> Executor<'a, 'b> {
                         Ok(mut f) => { if write!(f, "{}", c).is_err() { return OpResult::Halt; } }
                         Err(_) => return OpResult::Halt,
                     }
-                    self.vm.stack.push(Value::Bool(true));
+                    self.stack.push(Value::Bool(true));
                 } else { return OpResult::Halt; }
                 OpResult::Continue
             }
             OpCode::StoreExists => {
-                let path_val = self.vm.stack.pop().unwrap();
+                let path_val = self.stack.pop().unwrap();
                 if let Value::String(p) = path_val {
                     if !is_safe_path(&p) { return OpResult::Halt; }
-                    self.vm.stack.push(Value::Bool(std::path::Path::new(&p).exists()));
+                    self.stack.push(Value::Bool(std::path::Path::new(&p).exists()));
                 } else { return OpResult::Halt; }
                 OpResult::Continue
             }
             OpCode::StoreDelete => {
-                let path_val = self.vm.stack.pop().unwrap();
+                let path_val = self.stack.pop().unwrap();
                 if let Value::String(p) = path_val {
                     if !is_safe_path(&p) { return OpResult::Halt; }
                     let path = std::path::Path::new(&p);
@@ -1138,37 +1160,38 @@ impl<'a, 'b> Executor<'a, 'b> {
                     } else {
                         std::fs::remove_file(path).is_ok()
                     };
-                    self.vm.stack.push(Value::Bool(res));
+                    self.stack.push(Value::Bool(res));
                 } else { return OpResult::Halt; }
                 OpResult::Continue
             }
 
             OpCode::JsonParse => {
-                let s_val = self.vm.stack.pop().expect("JsonParse: string");
+                let s_val = self.stack.pop().expect("JsonParse: string");
                 if let Value::String(s) = s_val {
                     match serde_json::from_str::<serde_json::Value>(&s) {
-                        Ok(v) => self.vm.stack.push(Value::Json(std::rc::Rc::new(std::cell::RefCell::new(v)))),
+                        Ok(v) => self.stack.push(Value::Json(Arc::new(RwLock::new(v)))),
                         Err(_) => return OpResult::Halt,
                     }
                 } else { return OpResult::Halt; }
                 OpResult::Continue
             }
             OpCode::JsonBind(idx) => {
-                let path_val = self.vm.stack.pop().expect("JsonBind: path");
-                let json_val = self.vm.stack.pop().expect("JsonBind: json");
+                let path_val = self.stack.pop().expect("JsonBind: path");
+                let json_val = self.stack.pop().expect("JsonBind: json");
                 if let (Value::Json(j), Value::String(p)) = (json_val, path_val) {
-                    if let Some(v) = json_path_to_value(&j.borrow(), &p) {
-                        let target_val = self.vm.globals[idx].clone();
-                        self.vm.globals[idx] = json_value_to_typed_value_raw(&v, &target_val);
+                    if let Some(v) = json_path_to_value(&j.read(), &p) {
+                        let mut glbs = self.vm.globals.write();
+                        let target_val = glbs[idx].clone();
+                        glbs[idx] = json_value_to_typed_value_raw(&v, &target_val);
                     } else { return OpResult::Halt; }
                 }
                 OpResult::Continue
             }
             OpCode::JsonBindLocal(idx) => {
-                let path_val = self.vm.stack.pop().expect("JsonBindLocal: path");
-                let json_val = self.vm.stack.pop().expect("JsonBindLocal: json");
+                let path_val = self.stack.pop().expect("JsonBindLocal: path");
+                let json_val = self.stack.pop().expect("JsonBindLocal: json");
                 if let (Value::Json(j), Value::String(p)) = (json_val, path_val) {
-                    if let Some(v) = json_path_to_value(&j.borrow(), &p) {
+                    if let Some(v) = json_path_to_value(&j.read(), &p) {
                         if idx >= locals.len() { locals.resize(idx + 1, Value::Bool(false)); }
                         let target_val = locals[idx].clone();
                         locals[idx] = json_value_to_typed_value_raw(&v, &target_val);
@@ -1177,194 +1200,170 @@ impl<'a, 'b> Executor<'a, 'b> {
                 OpResult::Continue
             }
             OpCode::JsonInject(idx) => {
-                let mapping_val = self.vm.stack.pop().expect("JsonInject: mapping");
-                let json_val    = self.vm.stack.pop().expect("JsonInject: json");
+                let mapping_val = self.stack.pop().expect("JsonInject: mapping");
+                let json_val    = self.stack.pop().expect("JsonInject: json");
                 if let (Value::Json(j), Value::Map(m)) = (json_val, mapping_val) {
-                    if let Value::Table(t) = self.vm.globals[idx].clone() {
-                        inject_json_into_table(&mut t.borrow_mut(), &j.borrow(), &m.borrow());
+                    let glbs = self.vm.globals.read();
+                    if let Value::Table(t) = glbs[idx].clone() {
+                        inject_json_into_table(&mut t.write(), &j.read(), &m.read());
                     }
                 }
                 OpResult::Continue
             }
             OpCode::JsonInjectLocal(idx) => {
-                let mapping_val = self.vm.stack.pop().expect("JsonInjectLocal: mapping");
-                let json_val    = self.vm.stack.pop().expect("JsonInjectLocal: json");
+                let mapping_val = self.stack.pop().expect("JsonInjectLocal: mapping");
+                let json_val    = self.stack.pop().expect("JsonInjectLocal: json");
                 if let (Value::Json(j), Value::Map(m)) = (json_val, mapping_val) {
                     if let Some(Value::Table(t)) = locals.get(idx).cloned() {
-                        inject_json_into_table(&mut t.borrow_mut(), &j.borrow(), &m.borrow());
+                        inject_json_into_table(&mut t.write(), &j.read(), &m.read());
                     }
                 }
                 OpResult::Continue
             }
 
             OpCode::DateNow => {
-                self.vm.stack.push(Value::Date(chrono::Local::now().naive_local()));
+                self.stack.push(Value::Date(chrono::Utc::now().naive_utc()));
                 OpResult::Continue
             }
 
-            OpCode::TableInit(const_id, row_count) => {
-                let mut table = match &self.ctx.constants[const_id] {
-                    Value::Table(t) => t.borrow().clone(),
-                    _ => return OpResult::Halt,
-                };
-                let col_count = table.columns.len();
-                let non_auto: Vec<usize> = table.columns.iter().enumerate()
-                    .filter(|(_, c)| !c.is_auto).map(|(i, _)| i).collect();
+            OpCode::TableInit(idx, row_count) => {
+                let skeleton = self.ctx.constants[idx].clone();
+                if let Value::Table(table_lock) = skeleton {
+                    let col_def = {
+                        let table = table_lock.read();
+                        table.columns.clone()
+                    };
+                    let non_auto_col_count = col_def.iter().filter(|c| !c.is_auto).count();
+                    
+                    let mut rows = Vec::with_capacity(row_count);
+                    for _ in 0..row_count {
+                        let mut row_vals = Vec::with_capacity(col_def.len());
+                        for _ in 0..col_def.len() {
+                            row_vals.push(Value::Bool(false));
+                        }
+                        rows.push(row_vals);
+                    }
 
-                let mut rows: Vec<Vec<Value>> = (0..row_count).map(|_| {
-                    let mut vals: Vec<Value> = (0..non_auto.len())
-                        .map(|_| self.vm.stack.pop().expect("TableInit: underflow"))
-                        .collect();
-                    vals.reverse();
-                    let mut row = vec![Value::Bool(false); col_count];
-                    for (i, &idx) in non_auto.iter().enumerate() { row[idx] = vals[i].clone(); }
-                    row
-                }).collect();
-                rows.reverse();
-
-                for (idx, col) in table.columns.iter().enumerate() {
-                    if col.is_auto {
-                        for (n, row) in rows.iter_mut().enumerate() {
-                            row[idx] = Value::Int(n as i64 + 1);
+                    for r in (0..row_count).rev() {
+                        let mut stack_vals = Vec::with_capacity(non_auto_col_count);
+                        for _ in 0..non_auto_col_count {
+                            stack_vals.push(self.stack.pop().expect("TableInit: missing cell value"));
+                        }
+                        stack_vals.reverse();
+                        
+                        let mut stack_idx = 0;
+                        for (c_idx, col) in col_def.iter().enumerate() {
+                            if col.is_auto {
+                                rows[r][c_idx] = Value::Int((r + 1) as i64);
+                            } else {
+                                rows[r][c_idx] = stack_vals[stack_idx].clone();
+                                stack_idx += 1;
+                            }
                         }
                     }
+
+                    let new_table_data = TableData {
+                        columns: col_def,
+                        rows,
+                    };
+                    self.stack.push(Value::Table(Arc::new(RwLock::new(new_table_data))));
+                } else {
+                    return OpResult::Halt;
                 }
-                table.rows = rows;
-                self.vm.stack.push(Value::Table(std::rc::Rc::new(std::cell::RefCell::new(table))));
                 OpResult::Continue
             }
 
             OpCode::FiberCreate(func_id, arg_count) => {
                 let mut args: Vec<Value> = (0..arg_count)
-                    .map(|_| self.vm.stack.pop().expect("FiberCreate: arg"))
+                    .map(|_| self.stack.pop().expect("FiberCreate: arg"))
                     .collect();
                 args.reverse();
                 let max = self.ctx.functions[func_id].max_locals.max(args.len());
                 args.resize(max, Value::Bool(false));
-                self.vm.stack.push(Value::Fiber(std::rc::Rc::new(std::cell::RefCell::new(
+                self.stack.push(Value::Fiber(Arc::new(RwLock::new(
                     FiberState { func_id, ip: 0, locals: args, stack: Vec::new(), is_done: false, yielded_value: None }
                 ))));
-                OpResult::Continue
-            }
-            OpCode::FiberNext => {
-                let fval = self.vm.stack.pop().expect("FiberNext: fiber");
-                if let Value::Fiber(frc) = fval {
-                    let cached = frc.borrow_mut().yielded_value.take();
-                    if let Some(val) = cached {
-                        self.vm.stack.push(val);
-                    } else if frc.borrow().is_done {
-                        println!("HALT.ALERT: FiberExhausted — .next() called on a done fiber");
-                        self.vm.stack.push(Value::Bool(false));
-                    } else {
-                        let initial_errors = self.vm.error_count;
-                        let res = self.resume_fiber(frc.clone(), true);
-                        if self.vm.error_count > initial_errors {
-                            return OpResult::Halt;
-                        }
-                        self.vm.stack.push(res.unwrap_or(Value::Bool(false)));
-                    }
-                } else { self.vm.stack.push(Value::Bool(false)); }
-                OpResult::Continue
-            }
-            OpCode::FiberRun => {
-                let fval = self.vm.stack.pop().expect("FiberRun: fiber");
-                if let Value::Fiber(frc) = fval {
-                    if !frc.borrow().is_done {
-                        let cached = frc.borrow_mut().yielded_value.take();
-                        if cached.is_none() {
-                            let initial_errors = self.vm.error_count;
-                            self.resume_fiber(frc, false);
-                            if self.vm.error_count > initial_errors {
-                                return OpResult::Halt;
-                            }
-                        }
-                    }
-                }
-                self.vm.stack.push(Value::Bool(true));
-                OpResult::Continue
-            }
-            OpCode::FiberIsDone => {
-                let fval = self.vm.stack.pop().expect("FiberIsDone: fiber");
-                if let Value::Fiber(frc) = fval {
-                    if frc.borrow().yielded_value.is_some() {
-                        self.vm.stack.push(Value::Bool(false));
-                    } else if frc.borrow().is_done {
-                        self.vm.stack.push(Value::Bool(true));
-                    } else {
-                        let res = self.resume_fiber(frc.clone(), true);
-                        if self.vm.fiber_yielded {
-                            frc.borrow_mut().yielded_value = Some(res.unwrap_or(Value::Bool(false)));
-                            self.vm.stack.push(Value::Bool(false));
-                        } else {
-                            frc.borrow_mut().yielded_value = Some(res.unwrap_or(Value::Bool(false)));
-                            self.vm.stack.push(Value::Bool(true));
-                        }
-                    }
-                } else { self.vm.stack.push(Value::Bool(true)); }
-                OpResult::Continue
-            }
-            OpCode::FiberClose => {
-                let fval = self.vm.stack.pop().expect("FiberClose: fiber");
-                if let Value::Fiber(frc) = fval { frc.borrow_mut().is_done = true; }
-                self.vm.stack.push(Value::Bool(true));
                 OpResult::Continue
             }
 
             OpCode::Call(func_id, arg_count) => {
                 let mut args: Vec<Value> = (0..arg_count)
-                    .map(|_| self.vm.stack.pop().expect("Call: arg"))
+                    .map(|_| self.stack.pop().expect("Call: arg"))
                     .collect();
                 args.reverse();
-                if self.vm.call_depth >= MAX_CALL_DEPTH { return OpResult::Halt; }
-                self.vm.call_depth += 1;
-                let initial_errors = self.vm.error_count;
+                if self.call_depth >= MAX_CALL_DEPTH { return OpResult::Halt; }
+                self.call_depth += 1;
+                let initial_errors = self.vm.error_count.load(Ordering::Relaxed);
                 let res = self.run_frame(func_id, &args);
-                self.vm.call_depth -= 1;
+                self.call_depth -= 1;
                 
-                if self.vm.error_count > initial_errors {
+                if self.vm.error_count.load(Ordering::Relaxed) > initial_errors {
                     return OpResult::Halt;
                 }
                 
-                self.vm.stack.push(res.unwrap_or(Value::Bool(false)));
+                self.stack.push(res.unwrap_or(Value::Bool(false)));
                 OpResult::Continue
             }
-            OpCode::MethodCall(method_id, arg_count) => {
+            OpCode::MethodCall(kind, arg_count) => {
+                // Special-case Fiber methods to reduce stack depth in deep delegation
+                if arg_count == 0 {
+                    match kind {
+                        MethodKind::Next | MethodKind::Run | MethodKind::IsDone | MethodKind::Close => {
+                            let receiver = self.stack.pop().expect("MethodCall: receiver");
+                            if let Value::Fiber(frc) = receiver {
+                                return self.handle_fiber_method(frc, kind, *_ip);
+                            }
+                            // If not a fiber, fall back to general dispatch
+                            self.stack.push(receiver);
+                        }
+                        _ => {}
+                    }
+                }
+
                 let mut args: Vec<Value> = (0..arg_count)
-                    .map(|_| self.vm.stack.pop().expect("MethodCall: arg"))
+                    .map(|_| self.stack.pop().expect("MethodCall: arg"))
                     .collect();
                 args.reverse();
-                let receiver    = self.vm.stack.pop().expect("MethodCall: receiver");
-                let method_name = self.ctx.constants[method_id].to_string();
-                self.handle_method_call(receiver, method_name, args)
+                let receiver = self.stack.pop().expect("MethodCall: receiver");
+                self.handle_method_call(receiver, kind, args, *_ip)
+            }
+            OpCode::MethodCallCustom(name_idx, arg_count) => {
+                let mut args: Vec<Value> = (0..arg_count)
+                    .map(|_| self.stack.pop().expect("MethodCallCustom: arg"))
+                    .collect();
+                args.reverse();
+                let receiver = self.stack.pop().expect("MethodCallCustom: receiver");
+                let method_name = self.ctx.constants[name_idx].to_string();
+                self.handle_method_call_custom(receiver, method_name, args, *_ip)
             }
 
             OpCode::HaltError => {
-                eprintln!("ERROR: {}", self.vm.stack.pop().expect("HaltError"));
+                eprintln!("ERROR: {}{}", self.stack.pop().expect("HaltError"), self.current_span_info(*_ip));
                 OpResult::Halt
             }
             OpCode::HaltAlert => {
-                println!("HALT.ALERT: {}", self.vm.stack.pop().expect("HaltAlert"));
+                println!("HALT.ALERT: {}{}", self.stack.pop().expect("HaltAlert"), self.current_span_info(*_ip));
                 OpResult::Continue
             }
             OpCode::HaltFatal => {
-                println!("HALT.FATAL: {}", self.vm.stack.pop().expect("HaltFatal"));
+                println!("HALT.FATAL: {}{}", self.stack.pop().expect("HaltFatal"), self.current_span_info(*_ip));
                 OpResult::Halt
             }
 
 
             OpCode::HttpCall(method_idx) => {
-                let body = self.vm.stack.pop();
-                let url_val = self.vm.stack.pop().expect("HttpCall: url missing");
+                let body = self.stack.pop();
+                let url_val = self.stack.pop().expect("HttpCall: url missing");
                 let url = url_val.to_string();
 
                 if let Err(e) = is_safe_url(&url) {
-                    eprintln!("{}", e);
+                    eprintln!("{}{}", e, self.current_span_info(*_ip));
                     // Return error response instead of halting — consistent with HttpRequest behavior
                     let mut res = serde_json::Map::new();
                     res.insert("status".to_string(), serde_json::Value::Number(0.into()));
                     res.insert("ok".to_string(), serde_json::Value::Bool(false));
                     res.insert("error".to_string(), serde_json::Value::String(e));
-                    self.vm.stack.push(Value::Json(std::rc::Rc::new(std::cell::RefCell::new(serde_json::Value::Object(res)))));
+                    self.stack.push(Value::Json(Arc::new(RwLock::new(serde_json::Value::Object(res)))));
                     return OpResult::Continue;
                 }
 
@@ -1375,7 +1374,7 @@ impl<'a, 'b> Executor<'a, 'b> {
                 let result = if let Some(b_val) = body {
                     if !matches!(b_val, Value::Bool(false)) {
                         let body_str = match &b_val {
-                            Value::Json(j) => j.borrow().to_string(),
+                            Value::Json(j) => j.read().to_string(),
                             other => other.to_string(),
                         };
                         req.set("Content-Type", "application/json").send_string(&body_str)
@@ -1386,14 +1385,14 @@ impl<'a, 'b> Executor<'a, 'b> {
                     req.call()
                 };
 
-                self.vm.stack.push(Value::Json(std::rc::Rc::new(std::cell::RefCell::new(build_response_json(result)))));
+                self.stack.push(Value::Json(Arc::new(RwLock::new(build_response_json(result)))));
                 OpResult::Continue
             }
 
             OpCode::HttpRequest => {
-                let config_val = self.vm.stack.pop().unwrap();
+                let config_val = self.stack.pop().unwrap();
                 if let Value::Map(m_rc) = config_val {
-                    let m = m_rc.borrow();
+                    let m = m_rc.read();
                     let mut method = "GET".to_string();
                     let mut url = String::new();
                     let mut url_safe = true;
@@ -1413,14 +1412,14 @@ impl<'a, 'b> Executor<'a, 'b> {
                             }
                             "headers" => {
                                 if let Value::Map(h_rc) = v {
-                                    for (hk, hv) in h_rc.borrow().iter() {
+                                    for (hk, hv) in h_rc.read().iter() {
                                         headers.push((hk.to_string(), hv.to_string()));
                                     }
                                 }
                             }
                             "body" => {
                                 let bs = match v {
-                                    Value::Json(j) => j.borrow().to_string(),
+                                    Value::Json(j) => j.read().to_string(),
                                     other => other.to_string(),
                                 };
                                 body = Some(bs);
@@ -1435,7 +1434,7 @@ impl<'a, 'b> Executor<'a, 'b> {
                         res.insert("status".to_string(), serde_json::Value::Number(0.into()));
                         res.insert("ok".to_string(), serde_json::Value::Bool(false));
                         res.insert("error".to_string(), serde_json::Value::String("SSRF blocked".to_string()));
-                        self.vm.stack.push(Value::Json(std::rc::Rc::new(std::cell::RefCell::new(serde_json::Value::Object(res)))));
+                        self.stack.push(Value::Json(Arc::new(RwLock::new(serde_json::Value::Object(res)))));
                         return OpResult::Continue;
                     }
 
@@ -1452,7 +1451,7 @@ impl<'a, 'b> Executor<'a, 'b> {
                         req.call()
                     };
 
-                    self.vm.stack.push(Value::Json(std::rc::Rc::new(std::cell::RefCell::new(build_response_json(result)))));
+                    self.stack.push(Value::Json(Arc::new(RwLock::new(build_response_json(result)))));
                 } else {
                     return OpResult::Halt;
                 }
@@ -1460,26 +1459,25 @@ impl<'a, 'b> Executor<'a, 'b> {
             }
 
             OpCode::HttpRespond => {
-                let headers = self.vm.stack.pop().unwrap_or(Value::Bool(false));
-                let body    = self.vm.stack.pop().unwrap();
-                let status  = self.vm.stack.pop().unwrap();
+                let headers = self.stack.pop().unwrap_or(Value::Bool(false));
+                let body    = self.stack.pop().unwrap();
+                let status  = self.stack.pop().unwrap();
 
                 let mut resp_obj = serde_json::Map::new();
                 resp_obj.insert("status".to_string(), value_to_json(&status));
                 resp_obj.insert("body".to_string(),   value_to_json(&body));
                 resp_obj.insert("headers".to_string(), value_to_json(&headers));
 
-                self.vm.stack.push(Value::Json(std::rc::Rc::new(std::cell::RefCell::new(serde_json::Value::Object(resp_obj)))));
+                self.stack.push(Value::Json(Arc::new(RwLock::new(serde_json::Value::Object(resp_obj)))));
                 OpResult::Continue
             }
-
-            // ── HTTP Server ───────────────────────────────────────────────────
             OpCode::HttpServe(name_idx) => {
-                let routes   = self.vm.stack.pop().unwrap();
-                let _workers = self.vm.stack.pop().unwrap();
-                let host_val = self.vm.stack.pop().unwrap();
-                let port_val = self.vm.stack.pop().unwrap().to_string();
+                let routes   = self.stack.pop().unwrap();
+                let workers_val = self.stack.pop().unwrap();
+                let host_val = self.stack.pop().unwrap();
+                let port_val = self.stack.pop().unwrap().to_string();
 
+                let workers = if let Value::Int(n) = workers_val { n.max(1) as usize } else { 1 };
                 let name = self.ctx.constants[name_idx].to_string();
                 let host_str = match &host_val {
                     Value::Bool(false) => "127.0.0.1".to_string(),
@@ -1487,161 +1485,174 @@ impl<'a, 'b> Executor<'a, 'b> {
                 };
                 let addr = format!("{}:{}", host_str, port_val);
 
-                let server = if let Some(s) = self.vm.servers.get(&name) {
+                let server = if let Some(s) = self.vm.servers.read().get(&name) {
                     s.clone()
                 } else {
                     let s = match tiny_http::Server::http(&addr) {
-                        Ok(s) => std::rc::Rc::new(s),
+                        Ok(s) => std::sync::Arc::new(s),
                         Err(e) => {
                             eprintln!("Failed to start server '{}' on {}: {}", name, addr, e);
                             return OpResult::Halt;
                         }
                     };
-                    self.vm.servers.insert(name.clone(), s.clone());
-                        println!("Server: starting '{}' on http://{}", name, addr);
+                    self.vm.servers.write().insert(name.clone(), s.clone());
+                    println!("Server: starting '{}' on http://{} with {} workers", name, addr, workers);
                     s
                 };
 
-                // ── TERMINAL DISPATCH LOOP ────────────────────────────────────
-                // As per spec 23.5: "serve: name {} is a terminal statement. No code after it executes."
-                loop {
-                    if let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_millis(50)) {
-                        let method  = request.method().to_string().to_uppercase();
-                        let raw_url = request.url().to_string();
-                        let path_only = raw_url.split('?').next().unwrap_or(&raw_url).to_string();
-                        
-                        let query_str = if let Some(pos) = raw_url.find('?') {
-                            raw_url[pos + 1..].to_string()
-                        } else {
-                            String::new()
+                let mut handles = Vec::new();
+                for i in 0..workers {
+                    let server_clone = server.clone();
+                    let vm_clone = self.vm.clone();
+                    let ctx_clone = self.ctx.clone();
+                    let routes_clone = routes.clone();
+                    let name_clone = name.clone();
+
+                    let handle = std::thread::spawn(move || {
+                        let mut worker_executor = Executor {
+                            vm: vm_clone,
+                            ctx: ctx_clone,
+                            current_spans: None,
+                            stack: Vec::with_capacity(128),
+                            call_depth: 0,
+                            fiber_yielded: false,
                         };
-                        let query_obj: serde_json::Value = {
-                            let mut m = serde_json::Map::new();
-                            if !query_str.is_empty() {
-                                for pair in query_str.split('&') {
-                                    let mut kv = pair.splitn(2, '=');
-                                    let k = kv.next().unwrap_or("").to_string();
-                                    let v = kv.next().unwrap_or("").to_string();
-                                    if !k.is_empty() {
-                                        let decoded_k = url_decode(&k);
-                                        let decoded_v = url_decode(&v);
-                                        m.insert(decoded_k, serde_json::Value::String(decoded_v));
+
+                        loop {
+                            if SHUTDOWN.load(Ordering::SeqCst) {
+                                if i == 0 { println!("Server '{}' shutting down gracefully...", name_clone); }
+                                break;
+                            }
+
+                            if let Ok(Some(mut request)) = server_clone.recv_timeout(std::time::Duration::from_millis(100)) {
+                                let method = request.method().to_string().to_uppercase();
+                                let raw_url = request.url().to_string();
+                                let path_only = raw_url.split('?').next().unwrap_or(&raw_url).to_string();
+                                
+                                let query_str = if let Some(pos) = raw_url.find('?') {
+                                    raw_url[pos + 1..].to_string()
+                                } else {
+                                    String::new()
+                                };
+                                
+                                let query_obj: serde_json::Value = {
+                                    let mut m = serde_json::Map::new();
+                                    if !query_str.is_empty() {
+                                        for pair in query_str.split('&') {
+                                            let mut kv = pair.splitn(2, '=');
+                                            let k = kv.next().unwrap_or("").to_string();
+                                            let v = kv.next().unwrap_or("").to_string();
+                                            if !k.is_empty() {
+                                                let decoded_k = url_decode(&k);
+                                                let decoded_v = url_decode(&v);
+                                                m.insert(decoded_k, serde_json::Value::String(decoded_v));
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                            serde_json::Value::Object(m)
-                        };
+                                    serde_json::Value::Object(m)
+                                };
 
-                        let routes_map = if let Value::Map(m_rc) = &routes {
-                            m_rc.borrow()
-                        } else {
-                            eprintln!("Server '{}': routes must be a map", name);
-                            return OpResult::Halt;
-                        };
+                                let routes_map_rc = if let Value::Map(m) = &routes_clone { m } else { break; };
+                                let routes_map = routes_map_rc.read();
 
-                        let handler = routes_map
-                            .iter()
-                            .find(|(k, _)| {
-                                let k_str = k.to_string();
-                                if k_str == "*" { return false; }
-                                let k_parts: Vec<&str> = k_str.split_whitespace().collect();
-                                if k_parts.len() == 2 {
-                                    let r_meth = k_parts[0].to_uppercase();
-                                    let r_path = k_parts[1];
-                                    r_meth == method && (r_path == path_only || r_path == "*")
-                                } else {
-                                    false
-                                }
-                            })
-                            .or_else(|| {
-                                // Automatic HEAD -> GET fallback
-                                if method == "HEAD" {
-                                    routes_map.iter().find(|(k, _)| {
+                                let handler = routes_map
+                                    .iter()
+                                    .find(|(k, _)| {
                                         let k_str = k.to_string();
+                                        if k_str == "*" { return false; }
                                         let k_parts: Vec<&str> = k_str.split_whitespace().collect();
-                                        k_parts.len() == 2 && k_parts[0].to_uppercase() == "GET" && k_parts[1] == path_only
+                                        if k_parts.len() == 2 {
+                                            let r_meth = k_parts[0].to_uppercase();
+                                            let r_path = k_parts[1];
+                                            r_meth == method && (r_path == path_only || r_path == "*")
+                                        } else {
+                                            false
+                                        }
                                     })
+                                    .or_else(|| {
+                                        if method == "HEAD" {
+                                            routes_map.iter().find(|(k, _)| {
+                                                let k_str = k.to_string();
+                                                let k_parts: Vec<&str> = k_str.split_whitespace().collect();
+                                                k_parts.len() == 2 && k_parts[0].to_uppercase() == "GET" && k_parts[1] == path_only
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .or_else(|| routes_map.iter().find(|(k, _)| k.to_string() == "*"))
+                                    .map(|(_, v)| v.clone());
+
+                                drop(routes_map);
+
+                                if let Some(Value::Function(fid)) = handler {
+                                    let mut h_map = serde_json::Map::new();
+                                    for h in request.headers() {
+                                        h_map.insert(h.field.to_string().to_lowercase(), serde_json::Value::String(h.value.to_string()));
+                                    }
+
+                                    let mut body_bytes = Vec::new();
+                                    {
+                                        let reader = request.as_reader();
+                                        let limit = 10 * 1024 * 1024;
+                                        let mut limited_reader = std::io::Read::take(reader, limit as u64 + 1);
+                                        let _ = std::io::Read::read_to_end(&mut limited_reader, &mut body_bytes);
+                                    }
+
+                                    if body_bytes.len() > 10 * 1024 * 1024 {
+                                        let resp = tiny_http::Response::from_string("{\"error\": \"Payload Too Large (10MB Limit)\"}")
+                                            .with_status_code(413)
+                                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap());
+                                        let _ = request.respond(resp);
+                                        continue;
+                                    }
+
+                                    let body_str  = String::from_utf8_lossy(&body_bytes).to_string();
+                                    let body_json = serde_json::from_str(&body_str).unwrap_or(serde_json::Value::String(body_str));
+
+                                    let mut req_map = serde_json::Map::new();
+                                    req_map.insert("method".to_string(),  serde_json::Value::String(method.clone()));
+                                    req_map.insert("path".to_string(),    serde_json::Value::String(path_only.clone()));
+                                    req_map.insert("query".to_string(),   query_obj);
+                                    req_map.insert("headers".to_string(), serde_json::Value::Object(h_map));
+                                    req_map.insert("body".to_string(),    body_json);
+                                    req_map.insert("ip".to_string(),      serde_json::Value::String(request.remote_addr().map(|a| a.to_string()).unwrap_or_else(|| "127.0.0.1".to_string())));
+                                    
+                                    let req_val = Value::Json(Arc::new(RwLock::new(serde_json::Value::Object(req_map))));
+
+                                    let mut resp_val = worker_executor.run_frame(fid, &[req_val]);
+                                    if let Some(Value::Fiber(f_rc)) = resp_val {
+                                        resp_val = worker_executor.resume_fiber(f_rc, true);
+                                    }
+
+                                    if let Some(Value::Json(resp_json_rc)) = resp_val {
+                                        worker_executor.send_tiny_http_response(request, resp_json_rc);
+                                    } else {
+                                        let resp = tiny_http::Response::from_string("{\"error\": \"Internal Server Error\"}")
+                                            .with_status_code(500)
+                                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+                                            .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                                        let _ = request.respond(resp);
+                                    }
                                 } else {
-                                    None
+                                    let resp = tiny_http::Response::from_string("{\"error\": \"Not Found\"}")
+                                        .with_status_code(404)
+                                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+                                        .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                                    let _ = request.respond(resp);
                                 }
-                            })
-                            .or_else(|| routes_map.iter().find(|(k, _)| k.to_string() == "*"))
-                            .map(|(_, v)| {
-                                v.clone()
-                            });
-
-                        if let Some(Value::Function(fid)) = handler {
-                            let mut h_map = serde_json::Map::new();
-                            for h in request.headers() {
-                                // Standardize on lowercase headers for consistent access
-                                h_map.insert(h.field.to_string().to_lowercase(), serde_json::Value::String(h.value.to_string()));
                             }
-
-                            let mut body_bytes = Vec::new();
-                            {
-                                let reader = request.as_reader();
-                                // 10MB limit enforcement
-                                let limit = 10 * 1024 * 1024;
-                                use std::io::Read;
-                                let mut limited_reader = reader.take(limit as u64 + 1);
-                                let _ = limited_reader.read_to_end(&mut body_bytes);
-                            }
-
-                            if body_bytes.len() > 10 * 1024 * 1024 {
-                                let resp = tiny_http::Response::from_string("{\"error\": \"Payload Too Large (10MB Limit)\"}")
-                                    .with_status_code(413)
-                                    .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap());
-                                let _ = request.respond(resp);
-                                continue;
-                            }
-
-                            let body_str  = String::from_utf8_lossy(&body_bytes).to_string();
-                            // If non-JSON, body will be raw string or null (we use raw string for professional resilience)
-                            let body_json = serde_json::from_str(&body_str).unwrap_or(serde_json::Value::String(body_str));
-
-                            let mut req_map = serde_json::Map::new();
-                            req_map.insert("method".to_string(),  serde_json::Value::String(method));
-                            req_map.insert("path".to_string(),    serde_json::Value::String(path_only));
-                            req_map.insert("query".to_string(),   query_obj);
-                            req_map.insert("headers".to_string(), serde_json::Value::Object(h_map));
-                            req_map.insert("body".to_string(),    body_json);
-                            req_map.insert("ip".to_string(),      serde_json::Value::String(request.remote_addr().map(|a| a.to_string()).unwrap_or_else(|| "127.0.0.1".to_string())));
-                            
-                            let req_val = Value::Json(std::rc::Rc::new(std::cell::RefCell::new(serde_json::Value::Object(req_map))));
-
-                            // Run handler synchronously
-                            let mut resp_val = self.run_frame(fid, &[req_val]);
-
-                            // FIX: If handler returns a Fiber, resolve it to get the actual response
-                            if let Some(Value::Fiber(f_rc)) = resp_val {
-                                resp_val = self.resume_fiber(f_rc, true);
-                            }
-
-                            if let Some(Value::Json(resp_json_rc)) = resp_val {
-                                self.send_tiny_http_response(request, resp_json_rc);
-                            } else {
-                                // 500 with CORS
-                                let resp = tiny_http::Response::from_string("{\"error\": \"Internal Server Error: Handler returned no response\"}")
-                                    .with_status_code(500)
-                                    .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
-                                    .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
-                                let _ = request.respond(resp);
-                            }
-                        } else {
-                            // 404 with CORS
-                            let resp = tiny_http::Response::from_string("{\"error\": \"Not Found\"}")
-                                .with_status_code(404)
-                                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
-                                .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
-                            let _ = request.respond(resp);
                         }
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    });
+                    handles.push(handle);
                 }
+
+                for h in handles { let _ = h.join(); }
+                OpResult::Halt
             }
 
             OpCode::CastInt => {
-                let v = self.vm.stack.pop().expect("CastInt");
+                let v = self.stack.pop().expect("CastInt");
                 let res = match v {
                     Value::Int(i) => Value::Int(i),
                     Value::Float(f) => Value::Int(f as i64),
@@ -1649,11 +1660,11 @@ impl<'a, 'b> Executor<'a, 'b> {
                     Value::Bool(b) => Value::Int(if b { 1 } else { 0 }),
                     _ => Value::Int(0),
                 };
-                self.vm.stack.push(res);
+                self.stack.push(res);
                 OpResult::Continue
             }
             OpCode::CastFloat => {
-                let v = self.vm.stack.pop().expect("CastFloat");
+                let v = self.stack.pop().expect("CastFloat");
                 let res = match v {
                     Value::Int(i) => Value::Float(i as f64),
                     Value::Float(f) => Value::Float(f),
@@ -1661,16 +1672,16 @@ impl<'a, 'b> Executor<'a, 'b> {
                     Value::Bool(b) => Value::Float(if b { 1.0 } else { 0.0 }),
                     _ => Value::Float(0.0),
                 };
-                self.vm.stack.push(res);
+                self.stack.push(res);
                 OpResult::Continue
             }
             OpCode::CastString => {
-                let v = self.vm.stack.pop().expect("CastString");
-                self.vm.stack.push(Value::String(v.to_string()));
+                let v = self.stack.pop().expect("CastString");
+                self.stack.push(Value::String(v.to_string()));
                 OpResult::Continue
             }
             OpCode::CastBool => {
-                let v = self.vm.stack.pop().expect("CastBool");
+                let v = self.stack.pop().expect("CastBool");
                 let res = match v {
                     Value::Int(i) => Value::Bool(i != 0),
                     Value::Float(f) => Value::Bool(f != 0.0),
@@ -1678,7 +1689,7 @@ impl<'a, 'b> Executor<'a, 'b> {
                     Value::Bool(b) => Value::Bool(b),
                     _ => Value::Bool(false),
                 };
-                self.vm.stack.push(res);
+                self.stack.push(res);
                 OpResult::Continue
             }
         }
@@ -1686,46 +1697,66 @@ impl<'a, 'b> Executor<'a, 'b> {
 
     // ── method dispatch ───────────────────────────────────────────────────────
 
-    fn handle_method_call(&mut self, receiver: Value, method_name: String, args: Vec<Value>) -> OpResult {
+    fn handle_method_call(&mut self, receiver: Value, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
         match receiver {
-            Value::Array(arr_rc)  => self.handle_array_method(arr_rc, &method_name, args),
-            Value::Set(set_rc)    => self.handle_set_method(set_rc, &method_name, args),
-            Value::Map(map_rc)    => self.handle_map_method(map_rc, &method_name, args),
-            Value::Table(t_rc)    => self.handle_table_method(t_rc, &method_name, args),
-            Value::Row(t_rc, idx) => self.handle_row_method(t_rc, idx, &method_name),
-            Value::Date(d)        => self.handle_date_method(d, &method_name, args),
-            Value::Json(j_rc)     => self.handle_json_method(j_rc.clone(), &method_name, args),
-            Value::Fiber(f_rc)    => self.handle_fiber_method(f_rc, &method_name),
-            Value::String(s)      => self.handle_string_method(s, &method_name, args),
+            Value::Array(arr_rc)  => self.handle_array_method(arr_rc, kind, args, ip),
+            Value::Set(set_rc)    => self.handle_set_method(set_rc, kind, args, ip),
+            Value::Map(map_rc)    => self.handle_map_method(map_rc, kind, args, ip),
+            Value::Table(t_rc)    => self.handle_table_method(t_rc, kind, args, ip),
+            Value::Row(t_rc, idx) => self.handle_row_method(t_rc, idx, kind, ip),
+            Value::Date(d)        => self.handle_date_method(d, kind, args, ip),
+            Value::Json(j_rc)     => self.handle_json_method(j_rc.clone(), kind, args, ip),
+            Value::Fiber(f_rc)    => self.handle_fiber_method(f_rc, kind, ip),
+            Value::String(s)      => self.handle_string_method(s, kind, args, ip),
             Value::Int(i) => {
-                if method_name == "to_str" || method_name == "toString" || method_name == "format" {
-                    self.vm.stack.push(Value::String(i.to_string()));
-                    OpResult::Continue
-                } else {
-                    eprintln!("Method {} not found on Int", method_name);
-                    OpResult::Halt
+                match kind {
+                    MethodKind::ToStr => {
+                        self.stack.push(Value::String(i.to_string()));
+                        OpResult::Continue
+                    }
+                    _ => {
+                        eprintln!("Method {:?} not found on Int{}", kind, self.current_span_info(ip));
+                        OpResult::Halt
+                    }
                 }
             }
             Value::Float(f) => {
-                if method_name == "to_str" || method_name == "toString" || method_name == "format" {
-                    self.vm.stack.push(Value::String(f.to_string()));
-                    OpResult::Continue
-                } else {
-                    eprintln!("Method {} not found on Float", method_name);
-                    OpResult::Halt
+                match kind {
+                    MethodKind::ToStr => {
+                        self.stack.push(Value::String(f.to_string()));
+                        OpResult::Continue
+                    }
+                    _ => {
+                        eprintln!("Method {:?} not found on Float{}", kind, self.current_span_info(ip));
+                        OpResult::Halt
+                    }
                 }
             }
             Value::Bool(b) => {
-                if method_name == "to_str" || method_name == "toString" {
-                    self.vm.stack.push(Value::String(b.to_string()));
-                    OpResult::Continue
-                } else {
-                    eprintln!("Method {} not found on Bool", method_name);
-                    OpResult::Halt
+                match kind {
+                    MethodKind::ToStr => {
+                        self.stack.push(Value::String(b.to_string()));
+                        OpResult::Continue
+                    }
+                    _ => {
+                        eprintln!("Method {:?} not found on Bool{}", kind, self.current_span_info(ip));
+                        OpResult::Halt
+                    }
                 }
             }
             Value::Function(_) => {
-                eprintln!("Method calls not supported for Function type");
+                eprintln!("Method calls not supported for Function type{}", self.current_span_info(ip));
+                OpResult::Halt
+            }
+        }
+    }
+
+    fn handle_method_call_custom(&mut self, receiver: Value, method_name: String, args: Vec<Value>, ip: usize) -> OpResult {
+        match receiver {
+            Value::Row(t_rc, idx) => self.handle_row_custom(t_rc, idx, &method_name, ip),
+            Value::Json(j_rc) => self.handle_json_custom(j_rc, &method_name, args, ip),
+            _ => {
+                eprintln!("Method {} not found on {:?}{}", method_name, receiver, self.current_span_info(ip));
                 OpResult::Halt
             }
         }
@@ -1735,39 +1766,56 @@ impl<'a, 'b> Executor<'a, 'b> {
 
     fn resume_fiber(
         &mut self,
-        fiber_rc: std::rc::Rc<std::cell::RefCell<FiberState>>,
+        fiber_rc: Arc<RwLock<FiberState>>,
         is_next: bool,
     ) -> Option<Value> {
         let (func_id, mut ip, mut locals, fstack) = {
-            let f = fiber_rc.borrow();
+            let mut f = fiber_rc.write();
             if f.is_done { return if is_next { f.yielded_value.clone() } else { None }; }
-            (f.func_id, f.ip, f.locals.clone(), f.stack.clone())
+            (f.func_id, f.ip, std::mem::take(&mut f.locals), std::mem::take(&mut f.stack))
         };
 
-        let saved = std::mem::replace(&mut self.vm.stack, fstack);
-        self.vm.fiber_yielded = false;
-        let bc = self.ctx.functions[func_id].bytecode.clone();
-        let res = self.execute_bytecode(&bc, &mut ip, &mut locals);
-        let fstack_after = std::mem::replace(&mut self.vm.stack, saved);
+        let chunk = self.ctx.functions[func_id].clone();
+        let old_spans = self.current_spans.replace(chunk.spans.clone());
+
+        let stack_base = self.stack.len();
+        self.stack.extend(fstack);
+        self.fiber_yielded = false;
+        
+        let res = self.execute_bytecode(&chunk.bytecode, &mut ip, &mut locals);
+        
+        let fstack_after = self.stack.split_off(stack_base);
 
         {
-            let mut f = fiber_rc.borrow_mut();
+            let mut f = fiber_rc.write();
             f.ip     = ip;
             f.locals = locals;
             f.stack  = fstack_after;
-            if !self.vm.fiber_yielded { f.is_done = true; }
+            if !self.fiber_yielded { f.is_done = true; }
         }
+        self.current_spans = old_spans;
         res
     }
 
     // ── core execution loop ───────────────────────────────────────────────────
 
+    fn run_frame_owned(&mut self, chunk: FunctionChunk) -> Option<Value> {
+        self.current_spans = Some(chunk.spans.clone());
+        let mut ip = 0;
+        let mut locals = vec![Value::Bool(false); chunk.max_locals];
+        let res = self.execute_bytecode(&chunk.bytecode, &mut ip, &mut locals);
+        res
+    }
+
     fn run_frame(&mut self, func_id: usize, params: &[Value]) -> Option<Value> {
-        let chunk = &self.ctx.functions[func_id];
+        let chunk = self.ctx.functions[func_id].clone();
+        let old_spans = self.current_spans.replace(chunk.spans.clone());
         let mut ip = 0;
         let mut locals = params.to_vec();
         locals.resize(chunk.max_locals.max(params.len()), Value::Bool(false));
-        self.execute_bytecode(&chunk.bytecode.clone(), &mut ip, &mut locals)
+        let res = self.execute_bytecode(&chunk.bytecode, &mut ip, &mut locals);
+        self.current_spans = old_spans;
+        res
     }
 
     fn execute_bytecode(&mut self, bytecode: &[OpCode], ip: &mut usize, locals: &mut Vec<Value>) -> Option<Value> {
@@ -1779,260 +1827,260 @@ impl<'a, 'b> Executor<'a, 'b> {
                 OpResult::Jump(t) => *ip = t,
                 OpResult::Return(val) => {
                     *ip = bytecode.len();
-                    self.vm.fiber_yielded = false;
+                    self.fiber_yielded = false;
                     return val;
                 }
                 OpResult::Yield(val) => {
-                    self.vm.fiber_yielded = true;
+                    self.fiber_yielded = true;
                     return val;
                 }
                 OpResult::Halt => {
                     *ip = bytecode.len();
-                    self.vm.fiber_yielded = false;
-                    self.vm.error_count += 1;
+                    self.fiber_yielded = false;
+                    self.vm.error_count.fetch_add(1, Ordering::Relaxed);
                     return None;
                 }
             }
         }
         *ip = bytecode.len();
-        self.vm.fiber_yielded = false;
+        self.fiber_yielded = false;
         None
     }
 
     // ── collection methods ────────────────────────────────────────────────────
 
-    fn handle_array_method(&mut self, arr_rc: std::rc::Rc<std::cell::RefCell<Vec<Value>>>, method_name: &str, args: Vec<Value>) -> OpResult {
-        match method_name {
-            "push"    => { arr_rc.borrow_mut().push(args[0].clone()); self.vm.stack.push(Value::Bool(true)); }
-            "pop"     => { let res = arr_rc.borrow_mut().pop().unwrap_or(Value::Bool(false)); self.vm.stack.push(res); }
-            "len" | "count" | "size" => self.vm.stack.push(Value::Int(arr_rc.borrow().len() as i64)),
-            "clear"   => { arr_rc.borrow_mut().clear(); self.vm.stack.push(Value::Bool(true)); }
-            "contains" => self.vm.stack.push(Value::Bool(arr_rc.borrow().contains(&args[0]))),
-            "isEmpty"  => self.vm.stack.push(Value::Bool(arr_rc.borrow().is_empty())),
-            "get" => {
-                let arr = arr_rc.borrow();
+    fn handle_array_method(&mut self, arr_rc: Arc<RwLock<Vec<Value>>>, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
+        match kind {
+            MethodKind::Push => { arr_rc.write().push(args[0].clone()); self.stack.push(Value::Bool(true)); }
+            MethodKind::Pop  => { let res = arr_rc.write().pop().unwrap_or(Value::Bool(false)); self.stack.push(res); }
+            MethodKind::Len | MethodKind::Count | MethodKind::Size => self.stack.push(Value::Int(arr_rc.read().len() as i64)),
+            MethodKind::Clear => { arr_rc.write().clear(); self.stack.push(Value::Bool(true)); }
+            MethodKind::Contains => self.stack.push(Value::Bool(arr_rc.read().contains(&args[0]))),
+            MethodKind::IsEmpty  => self.stack.push(Value::Bool(arr_rc.read().is_empty())),
+            MethodKind::Get => {
+                let arr = arr_rc.read();
                 if let Value::Int(i) = args[0] {
                     if i >= 0 && (i as usize) < arr.len() {
-                        self.vm.stack.push(arr[i as usize].clone());
+                        self.stack.push(arr[i as usize].clone());
                     } else {
-                        eprintln!("R303: Array index out of bounds: {}", i);
+                        eprintln!("R303: Array index out of bounds: {}{}", i, self.current_span_info(ip));
                         return OpResult::Halt;
                     }
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "insert" => {
+            MethodKind::Insert => {
                 if let (Value::Int(i), val) = (args[0].clone(), args[1].clone()) {
-                    let mut arr = arr_rc.borrow_mut();
+                    let mut arr = arr_rc.write();
                     if i >= 0 && (i as usize) <= arr.len() {
                         arr.insert(i as usize, val);
-                        self.vm.stack.push(Value::Bool(true));
+                        self.stack.push(Value::Bool(true));
                     } else {
-                        eprintln!("R303: Array insert index out of bounds: {}", i);
+                        eprintln!("R303: Array insert index out of bounds: {}{}", i, self.current_span_info(ip));
                         return OpResult::Halt;
                     }
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "update" => {
+            MethodKind::Update => {
                 if let (Value::Int(i), val) = (args[0].clone(), args[1].clone()) {
-                    let mut arr = arr_rc.borrow_mut();
+                    let mut arr = arr_rc.write();
                     if i >= 0 && (i as usize) < arr.len() {
                         arr[i as usize] = val;
-                        self.vm.stack.push(Value::Bool(true));
+                        self.stack.push(Value::Bool(true));
                     } else {
-                        eprintln!("R303: Array update index out of bounds: {}", i);
+                        eprintln!("R303: Array update index out of bounds: {}{}", i, self.current_span_info(ip));
                         return OpResult::Halt;
                     }
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "delete" => {
+            MethodKind::Delete => {
                 if let Value::Int(i) = args[0] {
-                    let mut arr = arr_rc.borrow_mut();
+                    let mut arr = arr_rc.write();
                     if i >= 0 && (i as usize) < arr.len() {
                         arr.remove(i as usize);
-                        self.vm.stack.push(Value::Bool(true));
+                        self.stack.push(Value::Bool(true));
                     } else {
-                        eprintln!("R303: Array delete index out of bounds: {}", i);
+                        eprintln!("R303: Array delete index out of bounds: {}{}", i, self.current_span_info(ip));
                         return OpResult::Halt;
                     }
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "find" => {
+            MethodKind::Find => {
                 let needle = &args[0];
-                let arr = arr_rc.borrow();
+                let arr = arr_rc.read();
                 let idx = arr.iter().position(|v| v == needle).map(|i| i as i64).unwrap_or(-1);
-                self.vm.stack.push(Value::Int(idx));
+                self.stack.push(Value::Int(idx));
             }
-            "join" => {
+            MethodKind::Join => {
                 let sep = if let Value::String(s) = &args[0] { s.as_str() } else { "" };
-                let arr = arr_rc.borrow();
+                let arr = arr_rc.read();
                 let res = arr.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(sep);
-                self.vm.stack.push(Value::String(res));
+                self.stack.push(Value::String(res));
             }
-            "show" => { println!("{}", Value::Array(arr_rc.clone())); self.vm.stack.push(Value::Bool(true)); }
-            "sort" => {
-                arr_rc.borrow_mut().sort();
-                self.vm.stack.push(Value::Bool(true));
+            MethodKind::Show => { println!("{}", Value::Array(arr_rc.clone())); self.stack.push(Value::Bool(true)); }
+            MethodKind::Sort => {
+                arr_rc.write().sort();
+                self.stack.push(Value::Bool(true));
             }
-            "reverse" => {
-                arr_rc.borrow_mut().reverse();
-                self.vm.stack.push(Value::Bool(true));
+            MethodKind::Reverse => {
+                arr_rc.write().reverse();
+                self.stack.push(Value::Bool(true));
             }
-            _ => { eprintln!("Unknown Array method: {}", method_name); return OpResult::Halt; }
+            _ => { eprintln!("Method {:?} not supported for Array{}", kind, self.current_span_info(ip)); return OpResult::Halt; }
         }
         OpResult::Continue
     }
 
-    fn handle_set_method(&mut self, set_rc: std::rc::Rc<std::cell::RefCell<std::collections::BTreeSet<Value>>>, method_name: &str, args: Vec<Value>) -> OpResult {
-        match method_name {
-            "add"      => { set_rc.borrow_mut().insert(args[0].clone()); self.vm.stack.push(Value::Bool(true)); }
-            "remove"   => { let ok = set_rc.borrow_mut().remove(&args[0]); self.vm.stack.push(Value::Bool(ok)); }
-            "len" | "count" | "size" => self.vm.stack.push(Value::Int(set_rc.borrow().len() as i64)),
-            "has" | "contains" => self.vm.stack.push(Value::Bool(set_rc.borrow().contains(&args[0]))),
-            "isEmpty"  => self.vm.stack.push(Value::Bool(set_rc.borrow().is_empty())),
-            "clear"    => { set_rc.borrow_mut().clear(); self.vm.stack.push(Value::Bool(true)); }
-            "show"     => { println!("{}", Value::Set(set_rc.clone())); self.vm.stack.push(Value::Bool(true)); }
-            _ => { eprintln!("Unknown Set method: {}", method_name); return OpResult::Halt; }
+    fn handle_set_method(&mut self, set_rc: Arc<RwLock<std::collections::BTreeSet<Value>>>, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
+        match kind {
+            MethodKind::Add => { set_rc.write().insert(args[0].clone()); self.stack.push(Value::Bool(true)); }
+            MethodKind::Remove   => { let ok = set_rc.write().remove(&args[0]); self.stack.push(Value::Bool(ok)); }
+            MethodKind::Len | MethodKind::Count | MethodKind::Size => self.stack.push(Value::Int(set_rc.read().len() as i64)),
+            MethodKind::Has | MethodKind::Contains => self.stack.push(Value::Bool(set_rc.read().contains(&args[0]))),
+            MethodKind::IsEmpty  => self.stack.push(Value::Bool(set_rc.read().is_empty())),
+            MethodKind::Clear    => { set_rc.write().clear(); self.stack.push(Value::Bool(true)); }
+            MethodKind::Show     => { println!("{}", Value::Set(set_rc.clone())); self.stack.push(Value::Bool(true)); }
+            _ => { eprintln!("Method {:?} not supported for Set{}", kind, self.current_span_info(ip)); return OpResult::Halt; }
         }
         OpResult::Continue
     }
 
-    fn handle_string_method(&mut self, s: String, method_name: &str, args: Vec<Value>) -> OpResult {
-        match method_name {
-            "length" | "size" => self.vm.stack.push(Value::Int(s.chars().count() as i64)),
-            "upper"  => self.vm.stack.push(Value::String(s.to_uppercase())),
-            "lower"  => self.vm.stack.push(Value::String(s.to_lowercase())),
-            "trim"   => self.vm.stack.push(Value::String(s.trim().to_string())),
-            "indexOf" => {
+    fn handle_string_method(&mut self, s: String, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
+        match kind {
+            MethodKind::Length | MethodKind::Size => self.stack.push(Value::Int(s.chars().count() as i64)),
+            MethodKind::Upper  => self.stack.push(Value::String(s.to_uppercase())),
+            MethodKind::Lower  => self.stack.push(Value::String(s.to_lowercase())),
+            MethodKind::Trim   => self.stack.push(Value::String(s.trim().to_string())),
+            MethodKind::IndexOf => {
                 if let Some(Value::String(sub)) = args.first() {
                     let idx = s.find(sub).map(|i| i as i64).unwrap_or(-1);
-                    self.vm.stack.push(Value::Int(idx));
-                } else { self.vm.stack.push(Value::Int(-1)); }
+                    self.stack.push(Value::Int(idx));
+                } else { self.stack.push(Value::Int(-1)); }
             }
-            "lastIndexOf" => {
+            MethodKind::LastIndexOf => {
                 if let Some(Value::String(sub)) = args.first() {
                     let idx = s.rfind(sub).map(|i| i as i64).unwrap_or(-1);
-                    self.vm.stack.push(Value::Int(idx));
-                } else { self.vm.stack.push(Value::Int(-1)); }
+                    self.stack.push(Value::Int(idx));
+                } else { self.stack.push(Value::Int(-1)); }
             }
-            "replace" => {
+            MethodKind::Replace => {
                 if args.len() != 2 { return OpResult::Halt; }
                 let from = args[0].to_string();
                 let to   = args[1].to_string();
-                if from.is_empty() { eprintln!("R307: .replace() called with empty 'from'"); return OpResult::Halt; }
-                self.vm.stack.push(Value::String(s.replace(&from, &to)));
+                if from.is_empty() { eprintln!("R307: .replace() called with empty 'from'{}", self.current_span_info(ip)); return OpResult::Halt; }
+                self.stack.push(Value::String(s.replace(&from, &to)));
             }
-            "slice" => {
+            MethodKind::Slice => {
                 if args.len() != 2 { return OpResult::Halt; }
                 let start = if let Value::Int(i) = args[0] { i } else { return OpResult::Halt; };
                 let end   = if let Value::Int(i) = args[1] { i } else { return OpResult::Halt; };
                 let chars: Vec<char> = s.chars().collect();
                 let len = chars.len() as i64;
                 if start < 0 || end > len || start > end {
-                    eprintln!("R303: String.slice out of bounds [{}, {}] for len {}", start, end, len);
+                    eprintln!("R303: String.slice out of bounds [{}, {}] for len {}{}", start, end, len, self.current_span_info(ip));
                     return OpResult::Halt;
                 }
-                self.vm.stack.push(Value::String(chars[start as usize..end as usize].iter().collect()));
+                self.stack.push(Value::String(chars[start as usize..end as usize].iter().collect()));
             }
-            "split" => {
+            MethodKind::Split => {
                 if args.is_empty() { return OpResult::Halt; }
                 let sep = args[0].to_string();
                 let parts: Vec<Value> = s.split(&sep).map(|p| Value::String(p.to_string())).collect();
-                self.vm.stack.push(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(parts))));
+                self.stack.push(Value::Array(Arc::new(RwLock::new(parts))));
             }
-            "startsWith" | "starts_with" => {
+            MethodKind::StartsWith => {
                 if args.is_empty() { return OpResult::Halt; }
                 let prefix = args[0].to_string();
-                self.vm.stack.push(Value::Bool(s.starts_with(prefix.as_str())));
+                self.stack.push(Value::Bool(s.starts_with(prefix.as_str())));
             }
-            "endsWith" | "ends_with" => {
+            MethodKind::EndsWith => {
                 if args.is_empty() { return OpResult::Halt; }
                 let suffix = args[0].to_string();
-                self.vm.stack.push(Value::Bool(s.ends_with(suffix.as_str())));
+                self.stack.push(Value::Bool(s.ends_with(suffix.as_str())));
             }
-            "toInt" | "to_int" => {
+            MethodKind::ToInt => {
                 match s.trim().parse::<i64>() {
-                    Ok(n) => self.vm.stack.push(Value::Int(n)),
+                    Ok(n) => self.stack.push(Value::Int(n)),
                     Err(_) => {
-                        eprintln!("halt.error: Cannot convert \"{}\" to Integer", s);
+                        eprintln!("halt.error: Cannot convert \"{}\" to Integer{}", s, self.current_span_info(ip));
                         return OpResult::Halt;
                     }
                 }
             }
-            "toFloat" | "to_float" => {
+            MethodKind::ToFloat => {
                 match s.trim().parse::<f64>() {
-                    Ok(f) => self.vm.stack.push(Value::Float(f)),
+                    Ok(f) => self.stack.push(Value::Float(f)),
                     Err(_) => {
-                        eprintln!("halt.error: Cannot convert \"{}\" to Float", s);
+                        eprintln!("halt.error: Cannot convert \"{}\" to Float{}", s, self.current_span_info(ip));
                         return OpResult::Halt;
                     }
                 }
             }
-            _ => { eprintln!("Unknown String method: {}", method_name); return OpResult::Halt; }
+            _ => { eprintln!("Method {:?} not supported for String{}", kind, self.current_span_info(ip)); return OpResult::Halt; }
         }
         OpResult::Continue
     }
 
-    fn handle_map_method(&mut self, map_rc: std::rc::Rc<std::cell::RefCell<Vec<(Value, Value)>>>, method_name: &str, args: Vec<Value>) -> OpResult {
-        match method_name {
-            "get" => {
+    fn handle_map_method(&mut self, map_rc: Arc<RwLock<Vec<(Value, Value)>>>, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
+        match kind {
+            MethodKind::Get => {
                 let key = &args[0];
-                let map = map_rc.borrow();
+                let map = map_rc.read();
                 if let Some((_, v)) = map.iter().find(|(k, _)| k == key) {
-                    self.vm.stack.push(v.clone());
+                    self.stack.push(v.clone());
                 } else {
-                    eprintln!("R304: Map key not found: {}", key);
+                    eprintln!("R304: Map key not found: {}{}", key, self.current_span_info(ip));
                     return OpResult::Halt;
                 }
             }
-            "set" | "insert" => {
+            MethodKind::Set | MethodKind::Insert => {
                 let key = args[0].clone(); let val = args[1].clone();
-                let mut map = map_rc.borrow_mut();
+                let mut map = map_rc.write();
                 if let Some(e) = map.iter_mut().find(|(k, _)| *k == key) { e.1 = val; }
                 else { map.push((key, val)); }
-                self.vm.stack.push(Value::Bool(true));
+                self.stack.push(Value::Bool(true));
             }
-            "len" | "count" | "size" => self.vm.stack.push(Value::Int(map_rc.borrow().len() as i64)),
-            "keys" => {
-                let keys: Vec<Value> = map_rc.borrow().iter().map(|(k, _)| k.clone()).collect();
-                self.vm.stack.push(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(keys))));
+            MethodKind::Len | MethodKind::Count | MethodKind::Size => self.stack.push(Value::Int(map_rc.read().len() as i64)),
+            MethodKind::Keys => {
+                let keys: Vec<Value> = map_rc.read().iter().map(|(k, _)| k.clone()).collect();
+                self.stack.push(Value::Array(Arc::new(RwLock::new(keys))));
             }
-            "values" => {
-                let vals: Vec<Value> = map_rc.borrow().iter().map(|(_, v)| v.clone()).collect();
-                self.vm.stack.push(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(vals))));
+            MethodKind::Values => {
+                let vals: Vec<Value> = map_rc.read().iter().map(|(_, v)| v.clone()).collect();
+                self.stack.push(Value::Array(Arc::new(RwLock::new(vals))));
             }
-            "contains" => {
-                let has = map_rc.borrow().iter().any(|(k, _)| k == &args[0]);
-                self.vm.stack.push(Value::Bool(has));
+            MethodKind::Contains => {
+                let has = map_rc.read().iter().any(|(k, _)| k == &args[0]);
+                self.stack.push(Value::Bool(has));
             }
-            "remove" | "delete" => {
+            MethodKind::Remove | MethodKind::Delete => {
                 let key = &args[0];
-                let mut map = map_rc.borrow_mut();
+                let mut map = map_rc.write();
                 let before = map.len();
                 map.retain(|(k, _)| k != key);
-                self.vm.stack.push(Value::Bool(map.len() < before));
+                self.stack.push(Value::Bool(map.len() < before));
             }
-            "clear" => { map_rc.borrow_mut().clear(); self.vm.stack.push(Value::Bool(true)); }
-            "show"  => { println!("{}", Value::Map(map_rc.clone())); self.vm.stack.push(Value::Bool(true)); }
-            _ => { eprintln!("Unknown Map method: {}", method_name); return OpResult::Halt; }
+            MethodKind::Clear => { map_rc.write().clear(); self.stack.push(Value::Bool(true)); }
+            MethodKind::Show  => { println!("{}", Value::Map(map_rc.clone())); self.stack.push(Value::Bool(true)); }
+            _ => { eprintln!("Method {:?} not supported for Map{}", kind, self.current_span_info(ip)); return OpResult::Halt; }
         }
         OpResult::Continue
     }
 
-    fn handle_table_method(&mut self, t_rc: std::rc::Rc<std::cell::RefCell<TableData>>, method_name: &str, args: Vec<Value>) -> OpResult {
-        let t = t_rc.borrow();
-        match method_name {
-            "count" | "len" | "size" => {
-                self.vm.stack.push(Value::Int(t.rows.len() as i64));
+    fn handle_table_method(&mut self, t_rc: Arc<RwLock<TableData>>, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
+        let t = t_rc.read();
+        match kind {
+            MethodKind::Count | MethodKind::Len | MethodKind::Size => {
+                self.stack.push(Value::Int(t.rows.len() as i64));
             }
-            "show" => {
+            MethodKind::Show => {
                 for col in &t.columns { print!("{}\t", col.name); }
                 println!();
                 for row in &t.rows { for v in row { print!("{:?}\t", v); } println!(); }
-                self.vm.stack.push(Value::Bool(true));
+                self.stack.push(Value::Bool(true));
             }
-            "insert" | "add" => {
+            MethodKind::Insert | MethodKind::Add => {
                 drop(t);
-                let mut t_mut = t_rc.borrow_mut();
+                let mut t_mut = t_rc.write();
                 let mut row = Vec::new();
                 let mut ai = 0usize;
                 let cols = t_mut.columns.clone();
@@ -2049,17 +2097,17 @@ impl<'a, 'b> Executor<'a, 'b> {
                     }
                 }
                 t_mut.rows.push(row);
-                self.vm.stack.push(Value::Bool(true));
+                self.stack.push(Value::Bool(true));
             }
-            "update" => {
+            MethodKind::Update => {
                 let idx = if let Value::Int(i) = args[0] { i } else { -1 };
                 let vals = &args[1];
                 drop(t);
                 if idx >= 0 {
-                    let mut t_mut = t_rc.borrow_mut();
+                    let mut t_mut = t_rc.write();
                     if (idx as usize) < t_mut.rows.len() {
                         if let Value::Array(arr_rc) = vals {
-                            let arr = arr_rc.borrow();
+                            let arr = arr_rc.read();
                             let mut ai = 0usize;
                             for ci in 0..t_mut.columns.len() {
                                 if !t_mut.columns[ci].is_auto {
@@ -2069,23 +2117,23 @@ impl<'a, 'b> Executor<'a, 'b> {
                                     }
                                 }
                             }
-                            self.vm.stack.push(Value::Bool(true));
-                        } else { self.vm.stack.push(Value::Bool(false)); }
-                    } else { self.vm.stack.push(Value::Bool(false)); }
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                            self.stack.push(Value::Bool(true));
+                        } else { self.stack.push(Value::Bool(false)); }
+                    } else { self.stack.push(Value::Bool(false)); }
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "delete" => {
+            MethodKind::Delete => {
                 let idx = if let Value::Int(i) = args[0] { i } else { -1 };
                 drop(t);
                 if idx >= 0 {
-                    let mut t_mut = t_rc.borrow_mut();
+                    let mut t_mut = t_rc.write();
                     if (idx as usize) < t_mut.rows.len() {
                         t_mut.rows.remove(idx as usize);
-                        self.vm.stack.push(Value::Bool(true));
-                    } else { self.vm.stack.push(Value::Bool(false)); }
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                        self.stack.push(Value::Bool(true));
+                    } else { self.stack.push(Value::Bool(false)); }
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "where" => {
+            MethodKind::Where => {
                 let filter_func = if let Value::Function(f) = args[0] { f } else { return OpResult::Halt; };
                 let row_count = t.rows.len();
                 drop(t);
@@ -2094,99 +2142,114 @@ impl<'a, 'b> Executor<'a, 'b> {
                     let mut run_args = vec![Value::Row(t_rc.clone(), i)];
                     run_args.extend_from_slice(&args[1..]);
                     if let Some(Value::Bool(true)) = self.run_frame(filter_func, &run_args) {
-                        filtered.push(t_rc.borrow().rows[i].clone());
+                        filtered.push(t_rc.read().rows[i].clone());
                     }
                 }
-                self.vm.stack.push(Value::Table(std::rc::Rc::new(std::cell::RefCell::new(
-                    TableData { columns: t_rc.borrow().columns.clone(), rows: filtered }
+                self.stack.push(Value::Table(Arc::new(RwLock::new(
+                    TableData { columns: t_rc.read().columns.clone(), rows: filtered }
                 ))));
             }
-            "get" => {
+            MethodKind::Get => {
                 let idx = if let Value::Int(i) = args[0] { i } else { -1 };
                 if idx >= 0 && (idx as usize) < t.rows.len() {
-                    self.vm.stack.push(Value::Row(t_rc.clone(), idx as usize));
+                    self.stack.push(Value::Row(t_rc.clone(), idx as usize));
                 } else {
-                    eprintln!("R303: Table.get index out of bounds: {}", idx);
+                    eprintln!("R303: Table.get index out of bounds: {}{}", idx, self.current_span_info(ip));
                     return OpResult::Halt;
                 }
             }
-            "join" => {
-                if args.is_empty() { eprintln!("join: missing arguments"); return OpResult::Halt; }
+            MethodKind::Join => {
+                if args.is_empty() { eprintln!("join: missing arguments{}", self.current_span_info(ip)); return OpResult::Halt; }
                 let right_rc = match args[0].clone() {
                     Value::Table(r) => r,
-                    _ => { eprintln!("join: first argument must be a table"); return OpResult::Halt; }
+                    _ => { eprintln!("join: first argument must be a table{}", self.current_span_info(ip)); return OpResult::Halt; }
                 };
                 let pred = if args.len() >= 3 {
                     match (args[1].clone(), args[2].clone()) {
                         (Value::String(lk), Value::String(rk)) => JoinPred::Keys(lk, rk),
-                        _ => { eprintln!("join: key args must be strings"); return OpResult::Halt; }
+                        _ => { eprintln!("join: key args must be strings{}", self.current_span_info(ip)); return OpResult::Halt; }
                     }
                 } else if args.len() == 2 {
                     match args[1] {
                         Value::Function(fid) => JoinPred::Lambda(fid),
-                        _ => { eprintln!("join: second arg must be a function"); return OpResult::Halt; }
+                        _ => { eprintln!("join: second arg must be a function{}", self.current_span_info(ip)); return OpResult::Halt; }
                     }
                 } else {
-                    eprintln!("join: requires 2 or 3 arguments"); return OpResult::Halt;
+                    eprintln!("join: requires 2 or 3 arguments{}", self.current_span_info(ip)); return OpResult::Halt;
                 };
                 let left_clone  = t.clone();
-                let right_clone = right_rc.borrow().clone();
+                let right_clone = right_rc.read().clone();
                 drop(t);
                 let result = join_tables(&left_clone, &right_clone, &pred, "b", self);
-                self.vm.stack.push(Value::Table(std::rc::Rc::new(std::cell::RefCell::new(result))));
+                self.stack.push(Value::Table(Arc::new(RwLock::new(result))));
             }
-            "clear" => {
+            MethodKind::Clear => {
                 drop(t);
-                t_rc.borrow_mut().rows.clear();
-                self.vm.stack.push(Value::Bool(true));
+                t_rc.write().rows.clear();
+                self.stack.push(Value::Bool(true));
             }
-            _ => { eprintln!("Unknown Table method: {}", method_name); return OpResult::Halt; }
+            _ => { eprintln!("Method {:?} not supported for Table{}", kind, self.current_span_info(ip)); return OpResult::Halt; }
         }
         OpResult::Continue
     }
 
-    fn handle_row_method(&mut self, t_rc: std::rc::Rc<std::cell::RefCell<TableData>>, row_idx: usize, method_name: &str) -> OpResult {
-        let t = t_rc.borrow();
+    fn handle_row_method(&mut self, t_rc: Arc<RwLock<TableData>>, row_idx: usize, kind: MethodKind, ip: usize) -> OpResult {
+        match kind {
+            MethodKind::Show => {
+                let t = t_rc.read();
+                println!("{:?}", t.rows[row_idx]);
+                self.stack.push(Value::Bool(true));
+            }
+            _ => {
+                eprintln!("Method {:?} not supported for Row{}", kind, self.current_span_info(ip));
+                return OpResult::Halt;
+            }
+        }
+        OpResult::Continue
+    }
+
+    fn handle_row_custom(&mut self, t_rc: Arc<RwLock<TableData>>, row_idx: usize, method_name: &str, ip: usize) -> OpResult {
+        let t = t_rc.read();
         if let Some(col_idx) = t.columns.iter().position(|c| c.name == method_name) {
-            self.vm.stack.push(t.rows[row_idx][col_idx].clone());
+            self.stack.push(t.rows[row_idx][col_idx].clone());
         } else {
             match method_name {
-                "show" => { println!("{:?}", t.rows[row_idx]); self.vm.stack.push(Value::Bool(true)); }
-                _ => { eprintln!("Unknown Row member: {}", method_name); return OpResult::Halt; }
+                "show" => { println!("{:?}", t.rows[row_idx]); self.stack.push(Value::Bool(true)); }
+                _ => { eprintln!("Unknown Row member: {}{}", method_name, self.current_span_info(ip)); return OpResult::Halt; }
             }
         }
         OpResult::Continue
     }
 
-    fn handle_date_method(&mut self, d: chrono::NaiveDateTime, method_name: &str, args: Vec<Value>) -> OpResult {
+    fn handle_date_method(&mut self, d: chrono::NaiveDateTime, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
         use chrono::Datelike;
         use chrono::Timelike;
-        match method_name {
-            "year"   => self.vm.stack.push(Value::Int(d.year() as i64)),
-            "month"  => self.vm.stack.push(Value::Int(d.month() as i64)),
-            "day"    => self.vm.stack.push(Value::Int(d.day() as i64)),
-            "hour"   => self.vm.stack.push(Value::Int(d.hour() as i64)),
-            "minute" => self.vm.stack.push(Value::Int(d.minute() as i64)),
-            "second" => self.vm.stack.push(Value::Int(d.second() as i64)),
-            "format" => {
+        match kind {
+            MethodKind::Year   => self.stack.push(Value::Int(d.year() as i64)),
+            MethodKind::Month  => self.stack.push(Value::Int(d.month() as i64)),
+            MethodKind::Day    => self.stack.push(Value::Int(d.day() as i64)),
+            MethodKind::Hour   => self.stack.push(Value::Int(d.hour() as i64)),
+            MethodKind::Minute => self.stack.push(Value::Int(d.minute() as i64)),
+            MethodKind::Second => self.stack.push(Value::Int(d.second() as i64)),
+            MethodKind::Format => {
                 let fmt_str = if let Some(Value::String(s)) = args.first() {
                     s.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d")
                      .replace("HH", "%H").replace("mm", "%M").replace("ss", "%S")
                 } else {
                     "%Y-%m-%d %H:%M:%S".to_string()
                 };
-                self.vm.stack.push(Value::String(d.format(&fmt_str).to_string()));
+                self.stack.push(Value::String(d.format(&fmt_str).to_string()));
             }
-            _ => { eprintln!("Unknown Date method: {}", method_name); return OpResult::Halt; }
+            _ => { eprintln!("Method {:?} not supported for Date{}", kind, self.current_span_info(ip)); return OpResult::Halt; }
         }
         OpResult::Continue
     }
 
     // ── FIX: dynamic JSON field access ────────────────────────────────────────
-    fn handle_json_method(&mut self, j_rc: std::rc::Rc<std::cell::RefCell<serde_json::Value>>, method_name: &str, args: Vec<Value>) -> OpResult {
-        let mut j_mut = j_rc.borrow_mut();
-        match method_name {
-            "set" | "insert" => {
+    fn handle_json_method(&mut self, j_rc: Arc<RwLock<serde_json::Value>>, kind: MethodKind, args: Vec<Value>, ip: usize) -> OpResult {
+        let mut j_mut = j_rc.write();
+        match kind {
+            MethodKind::Set | MethodKind::Insert => {
                 if args.len() >= 2 {
                     if let Value::String(path) = &args[0] {
                         let val = value_to_json(&args[1]);
@@ -2194,7 +2257,7 @@ impl<'a, 'b> Executor<'a, 'b> {
                     }
                 }
             }
-            "push" | "append" => {
+            MethodKind::Push | MethodKind::Append => {
                 if args.len() >= 2 {
                     if let Value::String(path) = &args[0] {
                         let val = value_to_json(&args[1]);
@@ -2207,20 +2270,20 @@ impl<'a, 'b> Executor<'a, 'b> {
                     }
                 }
             }
-            "count" | "len" | "size" => {
+            MethodKind::Count | MethodKind::Len | MethodKind::Size => {
                 let n = j_mut.as_array().map(|a| a.len())
                     .or_else(|| j_mut.as_object().map(|o| o.len()))
                     .unwrap_or(0);
-                self.vm.stack.push(Value::Int(n as i64));
+                self.stack.push(Value::Int(n as i64));
             }
-            "exists" => {
+            MethodKind::Exists => {
                 if let Value::String(path) = &args[0] {
                     let pp = normalize_json_path(path);
                     let found = j_mut.pointer(&pp).map(|v| !v.is_null()).unwrap_or(false);
-                    self.vm.stack.push(Value::Bool(found));
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                    self.stack.push(Value::Bool(found));
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "get" => {
+            MethodKind::Get => {
                 let path_storage;
                 let path = if let Value::String(s) = &args[0] {
                     s.as_str()
@@ -2232,99 +2295,103 @@ impl<'a, 'b> Executor<'a, 'b> {
                 };
                 let pp = normalize_json_path(path);
                 if let Some(v) = j_mut.pointer(&pp) {
-                    self.vm.stack.push(json_serde_to_value(v));
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                    self.stack.push(json_serde_to_value(v));
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "inject" => {
-                // Support 2-arg: inject(mapping, table)
-                // Support 3-arg: inject(key, mapping, table)
+            MethodKind::Inject => {
                 if args.len() == 2 {
                     if let (Value::Map(m), Value::Table(t)) = (&args[0], &args[1]) {
-                        inject_json_into_table(&mut t.borrow_mut(), &j_mut, &m.borrow());
-                        self.vm.stack.push(Value::Bool(true));
-                    } else { self.vm.stack.push(Value::Bool(false)); }
+                        inject_json_into_table(&mut t.write(), &j_mut, &m.read());
+                        self.stack.push(Value::Bool(true));
+                    } else { self.stack.push(Value::Bool(false)); }
                 } else if args.len() == 3 {
                     if let (Value::String(key), Value::Map(m), Value::Table(t)) = (&args[0], &args[1], &args[2]) {
                         let pp = normalize_json_path(key);
                         let sub_json = j_mut.pointer(&pp).unwrap_or(&serde_json::Value::Null);
-                        inject_json_into_table(&mut t.borrow_mut(), sub_json, &m.borrow());
-                        self.vm.stack.push(Value::Bool(true));
-                    } else { self.vm.stack.push(Value::Bool(false)); }
-                } else { self.vm.stack.push(Value::Bool(false)); }
+                        inject_json_into_table(&mut t.write(), sub_json, &m.read());
+                        self.stack.push(Value::Bool(true));
+                    } else { self.stack.push(Value::Bool(false)); }
+                } else { self.stack.push(Value::Bool(false)); }
             }
-            "to_str" => self.vm.stack.push(Value::String(j_mut.to_string())),
-            // ── FIX: dynamic field access by name (r.body.route, r.status, etc.) ──
-            field_name => {
-                // First try as object key
-                if let Some(v) = j_mut.get(field_name) {
-                    self.vm.stack.push(json_serde_to_value(v));
-                }
-                // Then try array index if field_name is a number
-                else if let Ok(idx) = field_name.parse::<usize>() {
-                    if let Some(v) = j_mut.get(idx) {
-                        self.vm.stack.push(json_serde_to_value(v));
-                    } else {
-                        self.vm.stack.push(Value::Bool(false));
-                    }
-                }
-                else {
-                    // Field not found — push false
-                    self.vm.stack.push(Value::Bool(false));
-                }
+            MethodKind::ToStr => self.stack.push(Value::String(j_mut.to_string())),
+            _ => {
+                eprintln!("Method {:?} not supported for JSON{}", kind, self.current_span_info(ip));
+                return OpResult::Halt;
             }
         }
         OpResult::Continue
     }
 
-    fn handle_fiber_method(&mut self, fiber_rc: std::rc::Rc<std::cell::RefCell<FiberState>>, method_name: &str) -> OpResult {
-        match method_name {
-            "next" => {
-                let cached = fiber_rc.borrow_mut().yielded_value.take();
+    fn handle_json_custom(&mut self, j_rc: Arc<RwLock<serde_json::Value>>, field_name: &str, _args: Vec<Value>, _ip: usize) -> OpResult {
+        let j_mut = j_rc.write();
+        // First try as object key
+        if let Some(v) = j_mut.get(field_name) {
+            self.stack.push(json_serde_to_value(v));
+        }
+        // Then try array index if field_name is a number
+        else if let Ok(idx) = field_name.parse::<usize>() {
+            if let Some(v) = j_mut.get(idx) {
+                self.stack.push(json_serde_to_value(v));
+            } else {
+                self.stack.push(Value::Bool(false));
+            }
+        }
+        else {
+            // Field not found — push false
+            self.stack.push(Value::Bool(false));
+        }
+        OpResult::Continue
+    }
+
+    fn handle_fiber_method(&mut self, fiber_rc: Arc<RwLock<FiberState>>, kind: MethodKind, ip: usize) -> OpResult {
+        match kind {
+            MethodKind::Next => {
+                let cached = fiber_rc.write().yielded_value.take();
                 if let Some(val) = cached {
-                    self.vm.stack.push(val);
-                } else if fiber_rc.borrow().is_done {
-                    self.vm.stack.push(Value::Bool(false));
+                    self.stack.push(val);
+                } else if fiber_rc.read().is_done {
+                    self.stack.push(Value::Bool(false));
                 } else {
                     let res = self.resume_fiber(fiber_rc.clone(), true);
-                    // FIXED: return the value whether it was yielded OR returned
-                    self.vm.stack.push(res.unwrap_or(Value::Bool(false)));
+                    self.stack.push(res.unwrap_or(Value::Bool(false)));
                 }
             }
-            "run" => {
-                if !fiber_rc.borrow().is_done {
-                    let cached = fiber_rc.borrow_mut().yielded_value.take();
+            MethodKind::Run => {
+                if !fiber_rc.read().is_done {
+                    let cached = fiber_rc.write().yielded_value.take();
                     if cached.is_none() { self.resume_fiber(fiber_rc, false); }
                 }
-                self.vm.stack.push(Value::Bool(true));
+                self.stack.push(Value::Bool(true));
             }
-            "isDone" => {
-                if fiber_rc.borrow().yielded_value.is_some() {
-                    self.vm.stack.push(Value::Bool(false));
-                } else if fiber_rc.borrow().is_done {
-                    self.vm.stack.push(Value::Bool(true));
+            MethodKind::IsDone => {
+                if fiber_rc.read().yielded_value.is_some() {
+                    self.stack.push(Value::Bool(false));
+                } else if fiber_rc.read().is_done {
+                    self.stack.push(Value::Bool(true));
                 } else {
                     let res = self.resume_fiber(fiber_rc.clone(), true);
-                    if self.vm.fiber_yielded {
-                        fiber_rc.borrow_mut().yielded_value = Some(res.unwrap_or(Value::Bool(false)));
-                        self.vm.stack.push(Value::Bool(false));
+                    if self.fiber_yielded {
+                        fiber_rc.write().yielded_value = Some(res.unwrap_or(Value::Bool(false)));
+                        self.stack.push(Value::Bool(false));
                     } else {
-                        // Returned, so it is done
-                        // FIXED: Cache the return value so .next() can still pick it up
-                        fiber_rc.borrow_mut().yielded_value = Some(res.unwrap_or(Value::Bool(false)));
-                        self.vm.stack.push(Value::Bool(true));
+                        fiber_rc.write().yielded_value = Some(res.unwrap_or(Value::Bool(false)));
+                        self.stack.push(Value::Bool(true));
                     }
                 }
             }
-            "close" => { fiber_rc.borrow_mut().is_done = true; self.vm.stack.push(Value::Bool(true)); }
-            _ => { eprintln!("Unknown Fiber method: {}", method_name); return OpResult::Halt; }
+            MethodKind::Close => {
+                fiber_rc.write().is_done = true;
+                self.stack.push(Value::Bool(true));
+            }
+            _ => { eprintln!("Method {:?} not supported for Fiber{}", kind, self.current_span_info(ip)); return OpResult::Halt; }
         }
         OpResult::Continue
     }
 
     // ── shared HTTP response builder ──────────────────────────────────────────────
 
-    fn send_tiny_http_response(&mut self, request: tiny_http::Request, resp_json_rc: std::rc::Rc<std::cell::RefCell<serde_json::Value>>) {
-        let resp_json = resp_json_rc.borrow();
+    fn send_tiny_http_response(&mut self, request: tiny_http::Request, resp_json_rc: Arc<RwLock<serde_json::Value>>) {
+        let resp_json = resp_json_rc.read();
         let (status, body_val, headers_val) = if let serde_json::Value::Object(m) = &*resp_json {
             let s = m.get("status").and_then(|v| v.as_u64()).unwrap_or(200) as u32;
             let b = m.get("body").cloned().unwrap_or(serde_json::Value::Null);
@@ -2433,14 +2500,14 @@ fn json_serde_to_value(v: &serde_json::Value) -> Value {
         }
         serde_json::Value::String(s) => Value::String(s.clone()),
         // Arrays and objects stay as Json for further dot-access
-        other => Value::Json(std::rc::Rc::new(std::cell::RefCell::new(other.clone()))),
+        other => Value::Json(Arc::new(RwLock::new(other.clone()))),
     }
 }
 
 fn json_value_to_typed_value_raw(v: &Value, target: &Value) -> Value {
     // If we have a Json wrapper, unwrap it first for the logic below
     let inner_json = if let Value::Json(j) = v {
-        Some(j.borrow().clone())
+        Some(j.read().clone())
     } else {
         None
     };
@@ -2481,7 +2548,7 @@ fn json_value_to_typed_value_raw(v: &Value, target: &Value) -> Value {
                     for item in arr {
                         vec.push(json_serde_to_value(item));
                     }
-                    return Value::Array(std::rc::Rc::new(std::cell::RefCell::new(vec)));
+                    return Value::Array(Arc::new(RwLock::new(vec)));
                 }
             }
             v.clone()
@@ -2492,7 +2559,7 @@ fn json_value_to_typed_value_raw(v: &Value, target: &Value) -> Value {
                  Value::Int(i) => Value::String(i.to_string()),
                  Value::Float(f) => Value::String(f.to_string()),
                  Value::Bool(b) => Value::String(b.to_string()),
-                 Value::Json(j) => Value::String(j.borrow().to_string()),
+                 Value::Json(j) => Value::String(j.read().to_string()),
                  _ => Value::String("".to_string()),
              }
         }
@@ -2500,7 +2567,7 @@ fn json_value_to_typed_value_raw(v: &Value, target: &Value) -> Value {
             match v {
                 Value::Bool(b) => Value::Bool(*b),
                 Value::Int(i) => Value::Bool(*i != 0),
-                Value::Json(j) => Value::Bool(j.borrow().as_bool().unwrap_or(false)),
+                Value::Json(j) => Value::Bool(j.read().as_bool().unwrap_or(false)),
                 _ => Value::Bool(false),
             }
         }
@@ -2584,16 +2651,16 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::Bool(b)   => serde_json::Value::Bool(*b),
         Value::Array(arr) => {
-            let a = arr.borrow();
+            let a = arr.read();
             serde_json::Value::Array(a.iter().map(value_to_json).collect())
         }
         Value::Map(m) => {
-            let b = m.borrow();
+            let b = m.read();
             let mut obj = serde_json::Map::new();
             for (k, v) in b.iter() { obj.insert(k.to_string(), value_to_json(v)); }
             serde_json::Value::Object(obj)
         }
-        Value::Json(j)  => j.borrow().clone(),
+        Value::Json(j)  => j.read().clone(),
         Value::Date(d)  => serde_json::Value::String(d.format("%Y-%m-%d").to_string()),
         _               => serde_json::Value::Null,
     }
@@ -2652,7 +2719,6 @@ pub fn is_safe_url(url_str: &str) -> Result<(), String> {
     let is_localhost = host == "localhost" || host == "127.0.0.1" || host == "::1";
 
     if !is_localhost {
-        // Block private IP ranges in production mode
         if host.starts_with("10.") || 
            host.starts_with("192.168.") ||
            host.starts_with("172.16.") || host.starts_with("172.17.") ||

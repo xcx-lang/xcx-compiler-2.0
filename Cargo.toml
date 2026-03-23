@@ -1,6 +1,6 @@
 [package]
 name = "xcx-compiler"
-version = "1.0.0"
+version = "2.1.0"
 edition = "2024"
 
 [dependencies]
@@ -12,3 +12,5 @@ tiny_http = "0.12.0"
 bcrypt = "0.17"
 argon2 = "0.5"
 hex = "0.4.3"
+ctrlc = "3.4"
+parking_lot = "0.12"

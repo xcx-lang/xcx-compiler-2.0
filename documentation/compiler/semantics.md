@@ -13,29 +13,43 @@ Interner::lookup(StringId(42)) → "foo"
 
 ## Symbol Table (`src/sema/symbol_table.rs`)
 
-The `SymbolTable` manages variable bindings across nested scopes.
+The `SymbolTable` manages variable bindings across nested scopes using a **parent-pointer linked chain**.
 
 ### Structure
 
 ```rust
-scopes: Vec<HashMap<String, Type>>   // stack of scope frames
-consts: Vec<HashSet<String>>         // which names are const, per scope
+pub struct SymbolTable<'a> {
+    parent: Option<&'a SymbolTable<'a>>,  // reference to enclosing scope
+    scopes: Vec<HashMap<String, Type>>,   // stack of scope frames (local to this table)
+    consts: Vec<HashSet<String>>,         // which names are const, per scope
+}
 ```
+
+### Creating a Child Scope
+
+When entering a function or fiber body, a new `SymbolTable` is created with a reference to the enclosing table instead of cloning it:
+
+```rust
+let mut func_symbols = SymbolTable::new_with_parent(symbols);
+```
+
+This is O(1) — only a single empty `HashMap` is allocated for the new frame. Lookup travels up the parent chain as needed.
 
 ### Scope Lifecycle
 
-- `enter_scope()` / `exit_scope()` push/pop frames — used for `if`, `while`, `for`, and function bodies.
-- `define(name, ty, is_const)` always writes to the **innermost** (current) scope.
-- `lookup(name)` walks scopes from innermost to outermost, returning the first match.
-- `has_in_current_scope(name)` checks only the current frame — used to detect redefinition within the same block.
+- `enter_scope()` / `exit_scope()` push/pop local frames within a table — used for `if`, `while`, `for` bodies.
+- `new_with_parent(parent)` creates a child table linked to the parent — used for function and fiber bodies.
+- `define(name, ty, is_const)` always writes to the **innermost** (current) scope of the current table.
+- `lookup(name)` walks local scopes from innermost to outermost, then follows the `parent` pointer chain.
+- `has_in_current_scope(name)` checks only the innermost frame of the current table — used to detect redefinition within the same block.
 
 ### Important: No Variable Shadowing
 
-XCX does **not** support variable shadowing. Defining a variable that already exists in the **current scope** raises `RedefinedVariable`. Variables in outer scopes are accessible but cannot be re-declared in an inner scope using the same name without an error.
+XCX does **not** support variable shadowing. Defining a variable that already exists in the **current scope** raises `RedefinedVariable`. Variables in parent scopes are accessible but cannot be re-declared in a child scope using the same name.
 
 ### `is_const(name)`
 
-Looks up which scope owns `name`, then checks the corresponding `consts` set. Reassigning a const produces `ConstReassignment`.
+Looks up which scope owns `name`, then checks the corresponding `consts` set. Follows the parent chain if not found locally. Reassigning a const produces `ConstReassignment`.
 
 ## Type Checker (`src/sema/checker.rs`)
 
@@ -43,7 +57,9 @@ The `Checker` struct walks the AST and accumulates `TypeError` values. The progr
 
 ### Pre-Scan Pass (`pre_scan_stmts`)
 
-Before checking any statement, the checker performs a **forward-declaration scan** of all `FunctionDef` and `FiberDef` nodes in the current statement list. This allows functions and fibers to be called before their definition in the source file (mutual recursion, call before declare).
+Before checking any statement body, the checker performs a **forward-declaration scan** of all top-level `FunctionDef` and `FiberDef` nodes in the current statement list. This allows functions and fibers to be called before their definition in the source file (mutual recursion, call before declare).
+
+The scan is **limited to top-level statements only** — it does not recurse into `if`/`while`/`for` bodies, since XCX requires functions and fibers to be declared at the top level. Each function's or fiber's body is visited exactly once during the main checking pass.
 
 For each function/fiber found, the checker registers:
 - A `FunctionSignature { params, return_type, is_fiber }` in `self.functions` (HashMap)

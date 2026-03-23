@@ -1,4 +1,4 @@
-# XCX 2.0 Collections
+# XCX 2.1 Collections
 
 ## Arrays
 

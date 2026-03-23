@@ -9,12 +9,13 @@ mod tests {
     use crate::sema::checker::Checker;
     use crate::sema::symbol_table::SymbolTable;
     use crate::backend::Compiler as XCXCompiler;
-    use crate::backend::vm::{VM, Value, VMContext};
+    use crate::backend::vm::{VM, Value, SharedContext};
+    use std::sync::Arc;
 
     // -------------------------------------------------------------------------
     // Helper: run a source string through the full pipeline and return the VM.
     // -------------------------------------------------------------------------
-    fn run(source: &str) -> VM {
+    fn run(source: &str) -> Arc<VM> {
         let mut parser = Parser::new(source);
         let mut program = parser.parse_program();
         let mut interner = parser.into_interner();
@@ -29,11 +30,11 @@ mod tests {
         );
 
         let mut compiler = XCXCompiler::new();
-        let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
 
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &constants, functions: &functions };
-        vm.run(&bytecode, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         vm
     }
 
@@ -132,12 +133,12 @@ mod tests {
 
         let name_id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let global_idx = compiler.get_global_idx(name_id);
 
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &constants, functions: &functions };
-        vm.run(&bytecode, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
 
         match vm.get_global(global_idx) {
             Some(Value::Float(v)) => {
@@ -178,12 +179,12 @@ mod tests {
 
         let name_id = interner.intern("sentinel");
         let mut compiler = XCXCompiler::new();
-        let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let global_idx = compiler.get_global_idx(name_id);
 
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &constants, functions: &functions };
-        vm.run(&bytecode, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
 
         match vm.get_global(global_idx) {
             Some(Value::Int(v)) => assert_eq!(
@@ -257,12 +258,12 @@ mod tests {
         
         let success_id = interner.intern("success");
         let mut compiler = XCXCompiler::new();
-        let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let success_idx = compiler.get_global_idx(success_id);
         
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &constants, functions: &functions };
-        vm.run(&bytecode, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         
         match vm.get_global(success_idx) {
             Some(Value::Int(42)) => {},
@@ -285,12 +286,12 @@ mod tests {
         
         let err_id = interner.intern("err");
         let mut compiler = XCXCompiler::new();
-        let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let err_idx = compiler.get_global_idx(err_id);
         
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &constants, functions: &functions };
-        vm.run(&bytecode, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         
         match vm.get_global(err_idx) {
             Some(Value::String(s)) => assert!(s.contains("SSRF")),
@@ -315,11 +316,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&mut program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::Bool(true)), "startsWith(\"admin\") should be true");
     }
 
@@ -336,11 +337,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&mut program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::Bool(false)), "startsWith(\"admin\") should be false");
     }
 
@@ -357,11 +358,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&mut program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::Bool(true)), "endsWith(\".xcx\") should be true");
     }
 
@@ -378,11 +379,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&mut program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::Bool(false)), "endsWith(\".rs\") should be false");
     }
 
@@ -399,11 +400,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&mut program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::Int(42)), ".toInt() should return 42");
     }
 
@@ -420,11 +421,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&mut program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         match vm.get_global(idx) {
             Some(Value::Float(f)) => assert!((f - 3.14_f64).abs() < 1e-9, "Expected 3.14, got {}", f),
             other => panic!(".toFloat() expected Float(3.14), got {:?}", other),
@@ -445,11 +446,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&mut program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::Int(99)), ".toInt() should handle whitespace");
     }
 
@@ -475,12 +476,12 @@ mod tests {
         let first_id = interner.intern("first");
         let last_id  = interner.intern("last");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let first_idx = compiler.get_global_idx(first_id);
         let last_idx  = compiler.get_global_idx(last_id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(first_idx), Some(Value::Int(1)), "After sort first element should be 1");
         assert_eq!(vm.get_global(last_idx),  Some(Value::Int(9)), "After sort last element should be 9");
     }
@@ -500,11 +501,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let first_id = interner.intern("first");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let first_idx = compiler.get_global_idx(first_id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(
             vm.get_global(first_idx),
             Some(Value::String("apple".to_string())),
@@ -529,12 +530,12 @@ mod tests {
         let first_id = interner.intern("first");
         let last_id  = interner.intern("last");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let first_idx = compiler.get_global_idx(first_id);
         let last_idx  = compiler.get_global_idx(last_id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(first_idx), Some(Value::Int(5)), "After reverse first should be 5");
         assert_eq!(vm.get_global(last_idx),  Some(Value::Int(1)), "After reverse last should be 1");
     }
@@ -556,11 +557,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let first_id = interner.intern("first");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let first_idx = compiler.get_global_idx(first_id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(first_idx), Some(Value::Int(9)), "After sort+reverse first should be 9");
     }
 
@@ -578,11 +579,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("result");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::Bool(true)), "@wait(10) should execute and allow next stmt");
     }
 
@@ -601,11 +602,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let id = interner.intern("val");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let idx = compiler.get_global_idx(id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(idx), Some(Value::String("hello_xcx".to_string())), "env.get should retrieve XCX_TEST_VAR");
     }
 
@@ -626,12 +627,12 @@ mod tests {
         let ok_id = interner.intern("ok");
         let fail_id = interner.intern("fail");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let ok_idx = compiler.get_global_idx(ok_id);
         let fail_idx = compiler.get_global_idx(fail_id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(ok_idx), Some(Value::Bool(true)), "bcrypt verify should be true for correct password");
         assert_eq!(vm.get_global(fail_idx), Some(Value::Bool(false)), "bcrypt verify should be false for wrong password");
     }
@@ -651,11 +652,11 @@ mod tests {
         let _ = checker.check(&mut program, &mut symbols);
         let ok_id = interner.intern("ok");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let ok_idx = compiler.get_global_idx(ok_id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(ok_idx), Some(Value::Bool(true)), "argon2 verify should be true for correct password");
     }
 
@@ -676,12 +677,12 @@ mod tests {
         let l1_id = interner.intern("len1");
         let l2_id = interner.intern("len2");
         let mut compiler = XCXCompiler::new();
-        let (bc, consts, funcs) = compiler.compile(&program, &mut interner);
+        let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
         let l1_idx = compiler.get_global_idx(l1_id);
         let l2_idx = compiler.get_global_idx(l2_id);
-        let mut vm = VM::new();
-        let ctx = VMContext { constants: &consts, functions: &funcs };
-        vm.run(&bc, &ctx);
+        let vm = Arc::new(VM::new());
+        let ctx = SharedContext { constants, functions };
+        vm.clone().run(main_chunk, ctx);
         assert_eq!(vm.get_global(l1_idx), Some(Value::Int(16)));
         assert_eq!(vm.get_global(l2_idx), Some(Value::Int(32)));
     }

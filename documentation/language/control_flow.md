@@ -1,4 +1,4 @@
-# XCX 2.0 Control Flow
+# XCX 2.1 Control Flow
 
 ## Conditional Statements (if/elseif/else)
 

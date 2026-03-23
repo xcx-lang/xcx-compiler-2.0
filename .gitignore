@@ -5,8 +5,8 @@
 # Cargo.lock
 
 # XCX Releases
-/XCX_Ecosystem_v1.0.0/
-/XCX_Ecosystem_v1.0.0.zip
+/XCX_Ecosystem_v*/
+/XCX_Ecosystem_v*.zip
 
 # Subprojects artifacts
 /xcx-installer/target/

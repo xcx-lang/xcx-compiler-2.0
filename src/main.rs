@@ -6,6 +6,7 @@ mod backend;
 
 use std::fs;
 use std::env;
+use std::sync::Arc;
 
 use crate::parser::pratt::Parser;
 use crate::sema::checker::Checker;
@@ -15,6 +16,11 @@ use crate::backend::vm::VM;
 use crate::diagnostic::Reporter;
 
 fn main() {
+    ctrlc::set_handler(move || {
+        crate::backend::vm::SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+        println!("\n[XCX] Shutdown signal received. Cleaning up...");
+    }).expect("Error setting Ctrl-C handler");
+
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         crate::backend::repl::run_repl();
@@ -23,8 +29,8 @@ fn main() {
 
     let first_arg = &args[1];
     if first_arg == "--version" || first_arg == "version" {
-        println!("XCX Compiler v1.0");
-        println!("Language Version: XCX 2.0");
+        println!("XCX Compiler v2.1");
+        println!("Language Version: XCX 2.1");
         println!("Author: Heisenberg");
         return;
     }
@@ -130,13 +136,13 @@ fn run_file(filename: &str) {
     }
 
     let mut compiler = Compiler::new();
-    let (bytecode, constants, functions) = compiler.compile(&program, &mut interner);
+    let (main_chunk, constants, functions) = compiler.compile(&program, &mut interner);
 
-    let ctx = crate::backend::vm::VMContext {
-        constants: &constants,
-        functions: &functions,
+    let ctx = crate::backend::vm::SharedContext {
+        constants,
+        functions,
     };
 
-    let mut vm = VM::new();
-    vm.run(&bytecode, &ctx);
+    let vm = Arc::new(VM::new());
+    vm.run(main_chunk, ctx);
 }

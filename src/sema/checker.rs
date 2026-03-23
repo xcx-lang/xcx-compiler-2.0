@@ -56,7 +56,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub fn check(&mut self, program: &mut Program, symbols: &mut SymbolTable) -> Vec<TypeError> {
+    pub fn check(&mut self, program: &mut Program, symbols: &mut SymbolTable<'_>) -> Vec<TypeError> {
         let mut errors = Vec::new();
 
         self.functions.insert("i".to_string(), FunctionSignature { params: vec![Type::Unknown], return_type: Some(Type::Int), is_fiber: false });
@@ -72,10 +72,10 @@ impl<'a> Checker<'a> {
         errors
     }
 
-    fn pre_scan_stmts(&mut self, stmts: &[Stmt], symbols: &mut SymbolTable) {
+    fn pre_scan_stmts(&mut self, stmts: &[Stmt], symbols: &mut SymbolTable<'_>) {
         for stmt in stmts {
             match &stmt.kind {
-                crate::parser::ast::StmtKind::FunctionDef { name, params, return_type, body } => {
+                crate::parser::ast::StmtKind::FunctionDef { name, params, return_type, .. } => {
                     let name_str = self.interner.lookup(*name).to_string();
                     let param_types = params.iter().map(|(ty, _)| ty.clone()).collect();
                     let sig = FunctionSignature {
@@ -85,9 +85,8 @@ impl<'a> Checker<'a> {
                     };
                     self.functions.insert(name_str.clone(), sig);
                     symbols.define(name_str, Type::Unknown, false);
-                    self.pre_scan_stmts(body, symbols);
                 }
-                crate::parser::ast::StmtKind::FiberDef { name, params, return_type, body } => {
+                crate::parser::ast::StmtKind::FiberDef { name, params, return_type, .. } => {
                     let name_str = self.interner.lookup(*name).to_string();
                     let param_types = params.iter().map(|(ty, _)| ty.clone()).collect();
                     let sig = FunctionSignature {
@@ -100,23 +99,6 @@ impl<'a> Checker<'a> {
                     // FiberDecl's fallback path (symbols.lookup) also finds the right type.
                     let var_type = Type::Fiber(return_type.as_ref().map(|t| Box::new(t.clone())));
                     symbols.define(name_str, var_type, false);
-                    // Recurse defensively.
-                    self.pre_scan_stmts(body, symbols);
-                }
-                crate::parser::ast::StmtKind::If { then_branch, else_ifs, else_branch, .. } => {
-                    self.pre_scan_stmts(then_branch, symbols);
-                    for (_, branch) in else_ifs {
-                        self.pre_scan_stmts(branch, symbols);
-                    }
-                    if let Some(branch) = else_branch {
-                        self.pre_scan_stmts(branch, symbols);
-                    }
-                }
-                crate::parser::ast::StmtKind::While { body, .. } => {
-                    self.pre_scan_stmts(body, symbols);
-                }
-                crate::parser::ast::StmtKind::For { body, .. } => {
-                    self.pre_scan_stmts(body, symbols);
                 }
                 _ => {}
             }
@@ -149,7 +131,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_stmt(&mut self, stmt: &mut Stmt, symbols: &mut SymbolTable, errors: &mut Vec<TypeError>) {
+    fn check_stmt(&mut self, stmt: &mut Stmt, symbols: &mut SymbolTable<'_>, errors: &mut Vec<TypeError>) {
         let span = stmt.span.clone();
         match &mut stmt.kind {
             crate::parser::ast::StmtKind::VarDecl { is_const, ty, name, value } => {
@@ -198,7 +180,7 @@ impl<'a> Checker<'a> {
                     symbols.define(name_str.clone(), Type::Unknown, false);
                 }
 
-                let mut func_symbols = symbols.clone();
+                let mut func_symbols = SymbolTable::new_with_parent(symbols);
                 let prev_ctx = self.fiber_context.take();
                 self.fiber_context = Some(return_type.clone());
                 
@@ -506,7 +488,7 @@ impl<'a> Checker<'a> {
                 self.fiber_has_yield = false;
                 self.fiber_context = Some(return_type.clone());
 
-                let mut child = symbols.clone();
+                let mut child = SymbolTable::new_with_parent(symbols);
                 child.enter_scope();
                 // Self-register for recursion with correct return type.
                 child.define(name_str, var_type, false);
@@ -648,7 +630,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_routes_expr(&mut self, expr: &Expr, symbols: &mut SymbolTable, errors: &mut Vec<TypeError>) {
+    fn check_routes_expr(&mut self, expr: &Expr, symbols: &mut SymbolTable<'_>, errors: &mut Vec<TypeError>) {
         match &expr.kind {
             ExprKind::ArrayLiteral { elements } => {
                 for elem in elements {
@@ -682,11 +664,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_expr(&mut self, expr: &Expr, symbols: &mut SymbolTable, errors: &mut Vec<TypeError>) -> Type {
+    fn check_expr(&mut self, expr: &Expr, symbols: &mut SymbolTable<'_>, errors: &mut Vec<TypeError>) -> Type {
         self.check_expr_with_context(expr, symbols, errors, None)
     }
 
-    fn check_expr_with_context(&mut self, expr: &Expr, symbols: &mut SymbolTable, errors: &mut Vec<TypeError>, context: Option<Type>) -> Type {
+    fn check_expr_with_context(&mut self, expr: &Expr, symbols: &mut SymbolTable<'_>, errors: &mut Vec<TypeError>, context: Option<Type>) -> Type {
         let span = expr.span.clone();
         match &expr.kind {
             &ExprKind::TerminalCommand(_, _) => Type::Unknown,
@@ -864,12 +846,9 @@ impl<'a> Checker<'a> {
             }
             crate::parser::ast::ExprKind::FunctionCall { name, args } => {
                 let name_str = self.interner.lookup(*name).to_string();
-
-                // Check self.functions first (pre-scanned, knows is_fiber correctly).
                 let mut resolved_sig = self.functions.get(&name_str).cloned();
 
                 if resolved_sig.is_none() {
-                    // Fallback: symbol table (e.g. fiber variable passed as parameter).
                     if let Some(ty) = symbols.lookup(&name_str) {
                         match ty {
                             Type::Fiber(inner) => {
